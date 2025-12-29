@@ -1,249 +1,182 @@
-import React, { useState, useEffect } from 'react';
-import api from '../api/axios';
-import { useNavigate } from 'react-router-dom';
-import { LayoutDashboard, Key, CreditCard, LogOut, Plus, RefreshCw, ChevronDown } from 'lucide-react';
+import { useState, useEffect } from 'react'
+import { supabase } from '../supabaseClient'
+import { CheckCircle, XCircle, BarChart3, Trash2, ShieldAlert } from 'lucide-react'
 
-const Dashboard = () => {
-  const [businesses, setBusinesses] = useState([]);
-  const [selectedBusiness, setSelectedBusiness] = useState(null);
-  const [apiKeys, setApiKeys] = useState([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState("");
-  const navigate = useNavigate();
+export default function Dashboard() {
+  const [myModels, setMyModels] = useState([])
+  const [pendingModels, setPendingModels] = useState([]) 
+  const [loading, setLoading] = useState(true)
+  const [user, setUser] = useState(null)
 
   useEffect(() => {
-    fetchBusinesses();
-  }, []);
+    fetchDashboardData()
+  }, [])
 
-  useEffect(() => {
-    if (selectedBusiness) {
-      fetchApiKeys(selectedBusiness.id);
-    }
-  }, [selectedBusiness]);
+  async function fetchDashboardData() {
+    // 1. Get current user
+    const { data: { user } } = await supabase.auth.getUser()
+    setUser(user)
 
-  const fetchBusinesses = async () => {
-    try {
-      // Dynamic fetch instead of hardcoded URL
-      const res = await api.get('/businesses');
-      setBusinesses(res.data);
+    if (user) {
+      // 2. Fetch User's Models (Developer View)
+      const { data: myData } = await supabase
+        .from('ai_models')
+        .select('*')
+        .eq('owner_id', user.id)
       
-      // Auto-select the first business if available
-      if (res.data.length > 0) {
-        setSelectedBusiness(res.data[0]);
-      }
-      setLoading(false);
-    } catch (err) {
-      console.error("Failed to fetch businesses", err);
-      setError("Failed to load business data");
-      setLoading(false);
+      if (myData) setMyModels(myData)
+
+      // 3. Fetch Pending Models (Admin View)
+      // Showing all inactive models not owned by current user
+      const { data: pendingData } = await supabase
+        .from('ai_models')
+        .select('*')
+        .eq('is_active', false)
+        .neq('owner_id', user.id) 
       
-      // Redirect to login if unauthorized
-      if (err.response && err.response.status === 401) {
-        localStorage.removeItem('token');
-        navigate('/');
-      }
+      if (pendingData) setPendingModels(pendingData)
     }
-  };
-
-  const fetchApiKeys = async (businessId) => {
-    try {
-      const res = await api.get(`/keys?businessId=${businessId}`);
-      setApiKeys(res.data);
-    } catch (err) {
-      console.error("Failed to fetch keys", err);
-    }
-  };
-
-  const createApiKey = async () => {
-    if (!selectedBusiness) return;
-    try {
-      await api.post('/keys', { 
-        businessId: selectedBusiness.id,
-        name: `Key for ${selectedBusiness.name} - ${new Date().toLocaleDateString()}`
-      });
-      fetchApiKeys(selectedBusiness.id); // Refresh the list immediately
-    } catch (err) {
-      alert("Failed to create key");
-    }
-  };
-
-  const handleLogout = () => {
-    localStorage.removeItem('token');
-    localStorage.removeItem('user');
-    navigate('/');
-  };
-
-  if (loading) {
-    return (
-      <div className="min-h-screen bg-slate-900 flex items-center justify-center text-white">
-        <div className="animate-spin rounded-full h-8 w-8 border-t-2 border-b-2 border-indigo-500 mr-2"></div>
-        Loading GlanceID...
-      </div>
-    );
+    setLoading(false)
   }
 
+  // Action: Approve Model
+  async function approveModel(id) {
+    const { error } = await supabase
+      .from('ai_models')
+      .update({ is_active: true })
+      .eq('id', id)
+
+    if (!error) {
+      alert("Model Approved! It is now visible in the Marketplace.")
+      fetchDashboardData() // Refresh data
+    } else {
+      alert("Error: " + error.message)
+    }
+  }
+
+  // Action: Reject/Delete Model
+  async function deleteModel(id) {
+    if(!confirm("Are you sure you want to reject and delete this model?")) return;
+
+    const { error } = await supabase
+      .from('ai_models')
+      .delete()
+      .eq('id', id)
+
+    if (!error) {
+      fetchDashboardData() // Refresh data
+    } else {
+      alert("Error: " + error.message)
+    }
+  }
+
+  if (loading) return <div className="text-white p-8">Loading Console...</div>
+
   return (
-    <div className="flex h-screen bg-slate-900 text-slate-100 font-sans">
-      {/* SIDEBAR */}
-      <aside className="w-64 bg-slate-800 border-r border-slate-700 flex flex-col hidden md:flex">
-        <div className="p-6">
-          <h1 className="text-2xl font-bold text-indigo-500 tracking-tight">GlanceID</h1>
-          <p className="text-xs text-slate-500 mt-1">AI AGENT MARKETPLACE</p>
-        </div>
-
-        <nav className="flex-1 px-4 space-y-2 mt-4">
-          <div className="flex items-center px-4 py-3 bg-indigo-600/10 text-indigo-400 rounded-lg cursor-pointer">
-            <LayoutDashboard size={20} className="mr-3" />
-            <span className="font-medium">Overview</span>
-          </div>
-          <div className="flex items-center px-4 py-3 text-slate-400 hover:bg-slate-700/50 rounded-lg cursor-pointer transition">
-            <CreditCard size={20} className="mr-3" />
-            <span className="font-medium">Billing</span>
-          </div>
-        </nav>
-
-        <div className="p-4 border-t border-slate-700">
-          <button onClick={handleLogout} className="flex items-center w-full text-slate-400 hover:text-white transition px-4 py-2 hover:bg-slate-700 rounded-lg">
-            <LogOut size={18} className="mr-2" />
-            Sign Out
-          </button>
-        </div>
-      </aside>
-
-      {/* MAIN CONTENT AREA */}
-      <main className="flex-1 flex flex-col overflow-hidden">
+    <div className="min-h-screen bg-slate-950 text-slate-200 p-8 font-sans">
+      <div className="max-w-6xl mx-auto space-y-12">
         
         {/* HEADER */}
-        <header className="bg-slate-800/50 border-b border-slate-700 p-6 flex justify-between items-center backdrop-blur-sm">
-          <div>
-            <h2 className="text-xl font-semibold text-white">Dashboard</h2>
-            <p className="text-slate-400 text-sm">Manage your API keys and usage limits</p>
-          </div>
-          
-          <div className="flex items-center gap-4">
-            {/* Business Selector */}
-            <div className="relative">
-              <select 
-                className="appearance-none bg-slate-900 border border-slate-600 text-white text-sm rounded-lg focus:ring-indigo-500 focus:border-indigo-500 block w-64 p-2.5 pr-8"
-                onChange={(e) => {
-                  const bus = businesses.find(b => b.id === parseInt(e.target.value));
-                  setSelectedBusiness(bus);
-                }}
-                value={selectedBusiness?.id || ''}
-              >
-                {businesses.length === 0 && <option>No Business Found</option>}
-                {businesses.map(b => (
-                  <option key={b.id} value={b.id}>{b.name}</option>
-                ))}
-              </select>
-              <ChevronDown className="absolute right-3 top-3 text-slate-400 pointer-events-none" size={16} />
-            </div>
-          </div>
-        </header>
-
-        {/* SCROLLABLE CONTENT */}
-        <div className="flex-1 overflow-y-auto p-8">
-          <div className="max-w-6xl mx-auto space-y-8">
-            
-            {error && (
-              <div className="bg-red-500/10 border border-red-500/50 text-red-400 p-4 rounded-lg">
-                {error}
-              </div>
-            )}
-
-            {/* STATS CARDS */}
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-              <div className="bg-slate-800 p-6 rounded-xl border border-slate-700 shadow-lg">
-                <p className="text-slate-400 text-sm font-medium uppercase">Total Requests</p>
-                <div className="flex items-baseline mt-2">
-                  <h3 className="text-3xl font-bold text-white">0</h3>
-                  <span className="ml-2 text-sm text-slate-500">/ 1,000 limit</span>
-                </div>
-                <p className="text-green-400 text-sm mt-2 flex items-center">
-                  <RefreshCw size={14} className="mr-1" /> 0% usage
-                </p>
-              </div>
-
-              <div className="bg-slate-800 p-6 rounded-xl border border-slate-700 shadow-lg">
-                <p className="text-slate-400 text-sm font-medium uppercase">Current Plan</p>
-                <h3 className="text-3xl font-bold text-white mt-2">Free Tier</h3>
-                <p className="text-slate-500 text-sm mt-2">Upgrade for more limits</p>
-              </div>
-
-              <div className="bg-slate-800 p-6 rounded-xl border border-slate-700 shadow-lg">
-                <p className="text-slate-400 text-sm font-medium uppercase">Active Keys</p>
-                <h3 className="text-3xl font-bold text-white mt-2">{apiKeys.length}</h3>
-                <p className="text-indigo-400 text-sm mt-2">Keys are active</p>
-              </div>
-            </div>
-
-            {/* API KEYS TABLE SECTION */}
-            <div className="bg-slate-800 rounded-xl border border-slate-700 shadow-lg overflow-hidden">
-              <div className="p-6 border-b border-slate-700 flex justify-between items-center">
-                <div>
-                  <h3 className="text-lg font-semibold text-white flex items-center">
-                    <Key size={20} className="mr-2 text-indigo-500" />
-                    API Keys
-                  </h3>
-                  <p className="text-slate-400 text-sm mt-1">Manage keys for authentication.</p>
-                </div>
-                <button 
-                  onClick={createApiKey}
-                  disabled={!selectedBusiness}
-                  className="bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 disabled:cursor-not-allowed text-white px-4 py-2 rounded-lg text-sm font-medium flex items-center transition"
-                >
-                  <Plus size={16} className="mr-2" />
-                  Create New Key
-                </button>
-              </div>
-              
-              <div className="overflow-x-auto">
-                <table className="w-full text-left">
-                  <thead className="bg-slate-900/50 text-slate-400 text-xs uppercase font-medium">
-                    <tr>
-                      <th className="px-6 py-4">Key Name</th>
-                      <th className="px-6 py-4">Key Prefix</th>
-                      <th className="px-6 py-4">Created</th>
-                      <th className="px-6 py-4">Status</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-slate-700">
-                    {apiKeys.length === 0 ? (
-                      <tr>
-                        <td colSpan="4" className="px-6 py-12 text-center text-slate-500">
-                          No API keys found. Click "Create New Key" to get started.
-                        </td>
-                      </tr>
-                    ) : (
-                      apiKeys.map((key) => (
-                        <tr key={key.id} className="hover:bg-slate-700/30 transition">
-                          <td className="px-6 py-4 text-white font-medium">
-                            {key.name || "Unnamed Key"}
-                          </td>
-                          <td className="px-6 py-4 text-slate-500 font-mono text-sm">
-                            {key.key_hash ? key.key_hash.substring(0, 8) + '...' : '******'}
-                          </td>
-                          <td className="px-6 py-4 text-slate-400 text-sm">
-                            {new Date(key.created_at).toLocaleDateString()}
-                          </td>
-                          <td className="px-6 py-4">
-                            <span className="bg-green-500/10 text-green-400 px-2 py-1 rounded text-xs font-medium border border-green-500/20">
-                              Active
-                            </span>
-                          </td>
-                        </tr>
-                      ))
-                    )}
-                  </tbody>
-                </table>
-              </div>
-            </div>
-            
-          </div>
+        <div>
+          <h1 className="text-3xl font-bold text-white mb-2">Developer Console</h1>
+          <p className="text-slate-400">Manage your AI models and view performance.</p>
         </div>
-      </main>
-    </div>
-  );
-};
 
-export default Dashboard;
+        {/* SECTION 1: ADMIN AREA (Pending Approvals) */}
+        {pendingModels.length > 0 && (
+          <div className="bg-slate-900 border border-yellow-500/30 rounded-2xl p-6 relative overflow-hidden">
+            <div className="absolute top-0 left-0 w-1 h-full bg-yellow-500"></div>
+            <h2 className="text-xl font-bold text-white mb-4 flex items-center gap-2">
+              <ShieldAlert className="text-yellow-500" />
+              Admin Review Queue <span className="text-sm font-normal text-slate-400">(Actions Required)</span>
+            </h2>
+            
+            <div className="grid gap-4">
+              {pendingModels.map(model => (
+                <div key={model.id} className="bg-slate-950 p-4 rounded-xl flex justify-between items-center border border-slate-800">
+                  <div>
+                    <h3 className="font-bold text-white">{model.name}</h3>
+                    <p className="text-sm text-slate-400">{model.description}</p>
+                    <div className="flex gap-4 mt-2 text-xs font-mono text-slate-500">
+                      <span>Provider: {model.provider}</span>
+                      <span>ID: {model.id.slice(0,8)}...</span>
+                    </div>
+                  </div>
+                  <div className="flex gap-3">
+                    <button 
+                      onClick={() => deleteModel(model.id)}
+                      className="flex items-center gap-1 px-4 py-2 bg-red-900/30 text-red-400 rounded-lg hover:bg-red-900/50 transition border border-red-900"
+                    >
+                      <XCircle size={16} /> Reject
+                    </button>
+                    <button 
+                      onClick={() => approveModel(model.id)}
+                      className="flex items-center gap-1 px-4 py-2 bg-green-900/30 text-green-400 rounded-lg hover:bg-green-900/50 transition border border-green-900"
+                    >
+                      <CheckCircle size={16} /> Approve
+                    </button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {/* SECTION 2: DEVELOPER AREA (My Models) */}
+        <div>
+          <h2 className="text-xl font-bold text-white mb-6 flex items-center gap-2">
+            <BarChart3 className="text-indigo-400" />
+            My Published Models
+          </h2>
+
+          {myModels.length === 0 ? (
+             <div className="text-center py-12 bg-slate-900 rounded-2xl border border-dashed border-slate-800">
+               <p className="text-slate-500">You haven't published any models yet.</p>
+             </div>
+          ) : (
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+              {myModels.map(model => (
+                <div key={model.id} className="bg-slate-900 border border-slate-800 rounded-xl p-6 hover:border-indigo-500/50 transition group">
+                  
+                  <div className="flex justify-between items-start mb-4">
+                    <div className={`px-3 py-1 rounded-full text-xs font-bold border ${
+                      model.is_active 
+                        ? 'bg-green-900/20 text-green-400 border-green-900' 
+                        : 'bg-yellow-900/20 text-yellow-400 border-yellow-900'
+                    }`}>
+                      {model.is_active ? 'LIVE' : 'PENDING REVIEW'}
+                    </div>
+                    {/* Delete Button for Owner */}
+                    <button onClick={() => deleteModel(model.id)} className="text-slate-600 hover:text-red-400 transition">
+                      <Trash2 size={16} />
+                    </button>
+                  </div>
+
+                  <h3 className="text-lg font-bold text-white mb-1">{model.name}</h3>
+                  <p className="text-sm text-slate-400 line-clamp-2 h-10 mb-4">{model.description}</p>
+                  
+                  {/* Earnings Simulation Stats */}
+                  <div className="grid grid-cols-2 gap-2 mt-4 pt-4 border-t border-slate-800">
+                    <div>
+                      <p className="text-xs text-slate-500 uppercase">Price</p>
+                      <p className="font-mono text-white">${model.input_price_1k}</p>
+                    </div>
+                    <div>
+                      <p className="text-xs text-slate-500 uppercase">Est. Earnings</p>
+                      <p className="font-mono text-green-400">
+                        {/* Simulation: Dummy earnings for now */}
+                        ${model.is_active ? (Math.random() * 50).toFixed(2) : '0.00'}
+                      </p>
+                    </div>
+                  </div>
+
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+
+      </div>
+    </div>
+  )
+}
