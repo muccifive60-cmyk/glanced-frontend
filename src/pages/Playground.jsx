@@ -1,9 +1,14 @@
 import { useState, useEffect, useRef } from 'react'
 import { supabase } from '../supabaseClient'
-import { Send, Bot, User, Trash2, Link as LinkIcon } from 'lucide-react'
+import { Send, Bot, User, Trash2, Link as LinkIcon, Phone, PhoneOff, Mic } from 'lucide-react'
 import { Link } from 'react-router-dom'
+import Vapi from '@vapi-ai/web'
+
+// Initialize Vapi instance using the environment variable
+const vapi = new Vapi(import.meta.env.VITE_VAPI_PUBLIC_KEY);
 
 export default function Playground() {
+  // --- EXISTING STATE (Text & Database) ---
   const [models, setModels] = useState([])
   const [selectedModel, setSelectedModel] = useState(null)
   const [messages, setMessages] = useState([])
@@ -11,9 +16,36 @@ export default function Playground() {
   const [loading, setLoading] = useState(false)
   const messagesEndRef = useRef(null)
 
+  // --- NEW STATE (Voice) ---
+  const [isTalking, setIsTalking] = useState(false)
+  const [voiceStatus, setVoiceStatus] = useState('')
+
+  // --- 1. INITIALIZATION & EFFECTS ---
   useEffect(() => {
     fetchLibraryModels()
     fetchChatHistory()
+
+    // Vapi Event Listeners
+    vapi.on('call-start', () => {
+      setIsTalking(true)
+      setVoiceStatus('Voice Connected')
+    })
+
+    vapi.on('call-end', () => {
+      setIsTalking(false)
+      setVoiceStatus('')
+    })
+
+    vapi.on('error', (e) => {
+      console.error(e)
+      setVoiceStatus('Connection Error')
+      setIsTalking(false)
+    })
+
+    // Cleanup when component unmounts
+    return () => {
+      vapi.stop() 
+    }
   }, [])
 
   useEffect(() => {
@@ -24,7 +56,9 @@ export default function Playground() {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
   }
 
-  // UPDATED: Fetch models from the User's Library
+  // --- 2. DATA FETCHING (Supabase) ---
+
+  // Fetch models from the User's Library
   async function fetchLibraryModels() {
     const { data: { user } } = await supabase.auth.getUser()
     if (!user) return
@@ -54,7 +88,7 @@ export default function Playground() {
     }
   }
 
-  // 1. LOAD PREVIOUS CHATS
+  // Load Previous Chats
   async function fetchChatHistory() {
     const { data: { user } } = await supabase.auth.getUser()
     if (!user) return
@@ -68,7 +102,20 @@ export default function Playground() {
     if (data) setMessages(data)
   }
 
-  // 2. CLEAR CHAT FUNCTION
+  // --- 3. ACTIONS ---
+
+  // Voice Call Toggle
+  const toggleCall = () => {
+    if (isTalking) {
+      vapi.stop()
+    } else {
+      setVoiceStatus('Connecting...')
+      // Using the Demo Assistant ID for Vapi
+      vapi.start('be1bcb56-7536-493b-bd99-52e041d8e950')
+    }
+  }
+
+  // Clear Chat Function
   async function clearChat() {
     if (!confirm("Delete all chat history?")) return
     const { data: { user } } = await supabase.auth.getUser()
@@ -77,6 +124,7 @@ export default function Playground() {
     setMessages([])
   }
 
+  // Send Text Message Function
   async function handleSend(e) {
     e.preventDefault()
     if (!input.trim() || !selectedModel) return
@@ -87,7 +135,7 @@ export default function Playground() {
 
     const { data: { user } } = await supabase.auth.getUser()
 
-    // 3. SAVE USER MESSAGE TO DB
+    // Save User Message to DB
     if (user) {
       await supabase.from('chat_history').insert({
         user_id: user.id,
@@ -101,7 +149,7 @@ export default function Playground() {
     setMessages(prev => [...prev, { role: 'user', content: userText }])
 
     try {
-      // Call AI Engine
+      // Call AI Engine (Supabase Edge Function)
       const { data: engineData, error } = await supabase.functions.invoke('chat-engine', {
         body: { message: userText, model_id: selectedModel.id }
       })
@@ -110,7 +158,7 @@ export default function Playground() {
 
       const aiReply = engineData.reply
 
-      // 4. SAVE AI REPLY TO DB
+      // Save AI Reply to DB
       if (user) {
         await supabase.from('chat_history').insert({
           user_id: user.id,
@@ -170,22 +218,54 @@ export default function Playground() {
         {/* Header */}
         <div className="h-16 border-b border-slate-800 flex items-center justify-between px-6 bg-slate-900/50 backdrop-blur">
           <div className="flex items-center gap-3">
-            <div className={`w-2 h-2 rounded-full ${selectedModel ? 'bg-green-500' : 'bg-red-500'}`} />
-            <h3 className="font-bold text-white">
-              {selectedModel ? selectedModel.name : 'Select a Model from Library'}
-            </h3>
+            <div className={`w-2 h-2 rounded-full ${isTalking ? 'bg-green-400 animate-pulse' : (selectedModel ? 'bg-green-500' : 'bg-red-500')}`} />
+            <div>
+              <h3 className="font-bold text-white flex items-center gap-2">
+                {selectedModel ? selectedModel.name : 'Select a Model from Library'}
+                {isTalking && <span className="text-xs bg-green-500/20 text-green-400 px-2 py-0.5 rounded-full border border-green-500/50">Live</span>}
+              </h3>
+              {voiceStatus && <p className="text-xs text-green-400">{voiceStatus}</p>}
+            </div>
           </div>
-          <button onClick={clearChat} className="text-slate-400 hover:text-red-400 transition" title="Clear History">
-            <Trash2 size={18} />
-          </button>
+          
+          <div className="flex items-center gap-3">
+            {/* Call Button */}
+            <button 
+              onClick={toggleCall}
+              className={`flex items-center gap-2 px-4 py-2 rounded-lg font-medium transition-all ${
+                isTalking 
+                  ? 'bg-red-500/10 text-red-500 hover:bg-red-500/20 border border-red-500/50' 
+                  : 'bg-green-600 text-white hover:bg-green-700 shadow-lg shadow-green-900/20'
+              }`}
+            >
+              {isTalking ? <PhoneOff size={18} /> : <Phone size={18} />}
+              <span className="hidden sm:inline">{isTalking ? 'End Call' : 'Call Agent'}</span>
+            </button>
+
+            <div className="h-6 w-px bg-slate-700 mx-2"></div>
+
+            <button onClick={clearChat} className="text-slate-400 hover:text-red-400 transition p-2 hover:bg-slate-800 rounded-lg" title="Clear History">
+              <Trash2 size={18} />
+            </button>
+          </div>
         </div>
 
         {/* Messages */}
         <div className="flex-1 overflow-y-auto p-6 space-y-6 scroll-smooth">
-          {messages.length === 0 && (
+          {messages.length === 0 && !isTalking && (
              <div className="flex flex-col items-center justify-center h-full text-slate-500 opacity-50">
                 <Bot size={48} className="mb-4"/>
                 <p>Start a conversation...</p>
+             </div>
+          )}
+
+          {/* Voice Active Indicator for empty state */}
+          {isTalking && messages.length === 0 && (
+             <div className="flex flex-col items-center justify-center h-full">
+                <div className="w-24 h-24 bg-green-500/10 rounded-full flex items-center justify-center animate-pulse mb-4">
+                  <Mic size={40} className="text-green-500" />
+                </div>
+                <p className="text-slate-300">Listening...</p>
              </div>
           )}
 
@@ -216,11 +296,11 @@ export default function Playground() {
             <input 
               value={input} 
               onChange={(e) => setInput(e.target.value)} 
-              disabled={loading || !selectedModel} 
-              placeholder={selectedModel ? `Message ${selectedModel.name}...` : "Select a model from library first..."}
-              className="flex-1 bg-slate-950 border border-slate-700 rounded-xl py-4 pl-6 pr-12 text-white focus:border-indigo-500 focus:outline-none disabled:opacity-50" 
+              disabled={loading || !selectedModel || isTalking} 
+              placeholder={isTalking ? "Voice mode active..." : (selectedModel ? `Message ${selectedModel.name}...` : "Select a model from library first...")}
+              className="flex-1 bg-slate-950 border border-slate-700 rounded-xl py-4 pl-6 pr-12 text-white focus:border-indigo-500 focus:outline-none disabled:opacity-50 disabled:cursor-not-allowed" 
             />
-            <button type="submit" disabled={!input.trim() || loading} className="absolute right-2 p-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg transition disabled:bg-slate-700"><Send size={20} /></button>
+            <button type="submit" disabled={!input.trim() || loading || isTalking} className="absolute right-2 p-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg transition disabled:bg-slate-700 disabled:opacity-50"><Send size={20} /></button>
           </form>
         </div>
       </div>
