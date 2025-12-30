@@ -19,7 +19,8 @@ export default function Playground() {
   const messagesEndRef = useRef(null)
   const vapiRef = useRef(null)
 
-  // --- HARDCODED KEYS (To ensure it works immediately) ---
+  // --- CONFIGURATION ---
+  // Hardcoded for stability. 
   const VAPI_PUBLIC_KEY = "150fa8ac-12a5-48fb-934f-0a9bbadc2da7";
   const VAPI_ASSISTANT_ID = "be1bcb56-7536-493b-bd99-52e041d8e950";
 
@@ -28,9 +29,10 @@ export default function Playground() {
     fetchLibraryModels()
     fetchChatHistory()
     
-    // Load Vapi Immediately
+    // Initialize Voice Engine immediately
     initializeVapi()
 
+    // Cleanup on unmount
     return () => {
       if (vapiRef.current) {
         vapiRef.current.stop()
@@ -46,16 +48,24 @@ export default function Playground() {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
   }
 
-  // --- SAFE VAPI LOADING ---
+  // --- VOICE ENGINE INITIALIZATION ---
   async function initializeVapi() {
     try {
       setVoiceStatus("Loading Engine...")
+      
+      // Dynamic import to prevent constructor errors
       const VapiModule = await import('@vapi-ai/web');
       const VapiClass = VapiModule.default || VapiModule;
       
+      if (!VapiClass) {
+        throw new Error("Voice SDK could not be loaded.");
+      }
+
+      // Initialize Vapi Instance
       const vapiInstance = new VapiClass(VAPI_PUBLIC_KEY);
       vapiRef.current = vapiInstance;
 
+      // Setup Event Listeners
       vapiInstance.on('call-start', () => {
         setIsTalking(true)
         setVoiceStatus('Connected')
@@ -68,7 +78,7 @@ export default function Playground() {
 
       vapiInstance.on('error', (e) => {
         console.error("Vapi Error:", e)
-        setVoiceStatus('Error')
+        setVoiceStatus('Connection Error')
         setIsTalking(false)
       })
       
@@ -76,12 +86,12 @@ export default function Playground() {
       setVoiceStatus('Ready')
 
     } catch (err) {
-      console.error("Failed to load Vapi:", err);
-      setVoiceStatus("Failed")
+      console.error("Vapi Initialization Failed:", err);
+      setVoiceStatus("Voice unavailable")
     }
   }
 
-  // --- 2. DATA FETCHING ---
+  // --- 2. DATABASE FUNCTIONS (Supabase) ---
   async function fetchLibraryModels() {
     try {
       const { data: { user } } = await supabase.auth.getUser()
@@ -100,7 +110,7 @@ export default function Playground() {
         }
       }
     } catch (err) {
-      console.error("Supabase Error:", err)
+      console.error("Error fetching models:", err)
     }
   }
 
@@ -117,16 +127,15 @@ export default function Playground() {
 
       if (data) setMessages(data)
     } catch (err) {
-      console.error("History Error:", err)
+      console.error("Error fetching history:", err)
     }
   }
 
-  // --- 3. ACTIONS ---
+  // --- 3. USER ACTIONS ---
 
   const toggleCall = () => {
     if (!vapiRef.current) {
-        // If Vapi isn't loaded yet, try loading it again or alert
-        alert("Voice engine is still loading. Please wait 2 seconds and try again.");
+        alert("Voice engine is still loading. Please wait...");
         return;
     }
 
@@ -138,7 +147,7 @@ export default function Playground() {
         .catch(err => {
              console.error("Call failed:", err);
              setVoiceStatus("Connection Failed");
-             alert("Could not connect to voice server. Check console.");
+             alert("Could not connect to voice server.");
         });
     }
   }
@@ -163,6 +172,7 @@ export default function Playground() {
 
     const { data: { user } } = await supabase.auth.getUser()
 
+    // 1. Save User Message
     if (user) {
       await supabase.from('chat_history').insert({
         user_id: user.id,
@@ -174,6 +184,7 @@ export default function Playground() {
     setMessages(prev => [...prev, { role: 'user', content: userText }])
 
     try {
+      // 2. Call AI Engine
       const { data: engineData, error } = await supabase.functions.invoke('chat-engine', {
         body: { message: userText, model_id: selectedModel.id }
       })
@@ -181,6 +192,7 @@ export default function Playground() {
       if (error) throw error
       const aiReply = engineData.reply
 
+      // 3. Save AI Response
       if (user) {
         await supabase.from('chat_history').insert({
           user_id: user.id,
@@ -222,9 +234,9 @@ export default function Playground() {
         </div>
       </div>
 
-      {/* CHAT AREA */}
+      {/* CHAT INTERFACE */}
       <div className="flex-1 flex flex-col relative">
-        {/* Header */}
+        {/* HEADER */}
         <div className="h-16 border-b border-slate-800 flex items-center justify-between px-6 bg-slate-900/50 backdrop-blur">
           <div className="flex items-center gap-3">
             <div className={`w-2 h-2 rounded-full ${isTalking ? 'bg-green-400 animate-pulse' : (selectedModel ? 'bg-green-500' : 'bg-red-500')}`} />
@@ -232,14 +244,15 @@ export default function Playground() {
               <h3 className="font-bold text-white flex items-center gap-2">
                 {selectedModel ? selectedModel.name : 'Select a Model'}
               </h3>
-              <p className="text-xs text-slate-400">{voiceStatus}</p>
+              <p className={`text-xs ${voiceStatus.includes('Error') ? 'text-red-400' : 'text-slate-400'}`}>
+                {voiceStatus}
+              </p>
             </div>
           </div>
           
           <div className="flex items-center gap-3">
             <button 
               onClick={toggleCall}
-              // Removed 'disabled' attribute to force clickability, logic handled in toggleCall
               className={`flex items-center gap-2 px-4 py-2 rounded-lg font-medium transition-all ${
                 isTalking 
                   ? 'bg-red-500/10 text-red-500 border border-red-500/50' 
@@ -255,7 +268,7 @@ export default function Playground() {
           </div>
         </div>
 
-        {/* Messages */}
+        {/* MESSAGES AREA */}
         <div className="flex-1 overflow-y-auto p-6 space-y-6 scroll-smooth">
           {messages.length === 0 && !isTalking && (
              <div className="flex flex-col items-center justify-center h-full text-slate-500 opacity-50">
@@ -286,7 +299,7 @@ export default function Playground() {
           <div ref={messagesEndRef} />
         </div>
 
-        {/* Input */}
+        {/* INPUT AREA */}
         <div className="p-4 bg-slate-900 border-t border-slate-800">
           <form onSubmit={handleSend} className="max-w-4xl mx-auto relative flex items-center gap-4">
             <input 
