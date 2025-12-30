@@ -2,9 +2,10 @@ import { useState, useEffect, useRef } from 'react'
 import { supabase } from '../supabaseClient'
 import { Send, Bot, User, Trash2, Link as LinkIcon, Phone, PhoneOff, Mic } from 'lucide-react'
 import { Link } from 'react-router-dom'
+// FIX: Import Vapi as a module to prevent "Object is not a constructor" error
 import * as VapiSDK from '@vapi-ai/web'
 
-// Fix for "Object is not a constructor" error in production builds
+// FIX: Handle default export compatibility
 const Vapi = VapiSDK.default || VapiSDK;
 
 // Initialize Vapi instance using the VITE environment variable
@@ -115,7 +116,7 @@ export default function Playground() {
       vapi.stop()
     } else {
       setVoiceStatus('Connecting...')
-      // Using a default Assistant ID if none is provided dynamically
+      // Using a default Assistant ID if none is provided
       vapi.start('be1bcb56-7536-493b-bd99-52e041d8e950')
     }
   }
