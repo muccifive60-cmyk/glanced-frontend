@@ -1,7 +1,10 @@
 import { useState, useEffect, useRef } from 'react'
 import { supabase } from '../supabaseClient'
-import { Send, Bot, User, Trash2, Phone, PhoneOff, Mic } from 'lucide-react'
+import { Send, Bot, User, Trash2, Phone, PhoneOff, Camera, Image as ImageIcon, X } from 'lucide-react'
 import { Link } from 'react-router-dom'
+
+// NOTE: We use CDN injection for Vapi to avoid "Constructor" build errors.
+// Images are converted to Base64 for immediate preview.
 
 export default function Playground() {
   // --- STATE MANAGEMENT ---
@@ -11,6 +14,11 @@ export default function Playground() {
   const [input, setInput] = useState('')
   const [loading, setLoading] = useState(false)
   
+  // --- IMAGE STATE ---
+  const [attachedImage, setAttachedImage] = useState(null)
+  const fileInputRef = useRef(null) 
+  const cameraInputRef = useRef(null) 
+  
   // --- VOICE STATE ---
   const [isTalking, setIsTalking] = useState(false)
   const [voiceStatus, setVoiceStatus] = useState('Initializing...')
@@ -19,24 +27,20 @@ export default function Playground() {
   const messagesEndRef = useRef(null)
   const vapiRef = useRef(null)
 
-  // --- CONFIGURATION ---
-  // Hardcoded for stability. 
+  // --- KEYS (Hardcoded for stability) ---
   const VAPI_PUBLIC_KEY = "150fa8ac-12a5-48fb-934f-0a9bbadc2da7";
   const VAPI_ASSISTANT_ID = "be1bcb56-7536-493b-bd99-52e041d8e950";
 
-  // --- 1. INITIALIZATION & EFFECTS ---
+  // --- 1. INITIALIZATION ---
   useEffect(() => {
     fetchLibraryModels()
     fetchChatHistory()
     
-    // Initialize Voice Engine immediately
-    initializeVapi()
+    // Load Voice Engine via CDN
+    loadVapiScript()
 
-    // Cleanup on unmount
     return () => {
-      if (vapiRef.current) {
-        vapiRef.current.stop()
-      }
+      if (vapiRef.current) vapiRef.current.stop()
     }
   }, [])
 
@@ -48,24 +52,38 @@ export default function Playground() {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
   }
 
-  // --- VOICE ENGINE INITIALIZATION ---
-  async function initializeVapi() {
-    try {
-      setVoiceStatus("Loading Engine...")
-      
-      // Dynamic import to prevent constructor errors
-      const VapiModule = await import('@vapi-ai/web');
-      const VapiClass = VapiModule.default || VapiModule;
-      
-      if (!VapiClass) {
-        throw new Error("Voice SDK could not be loaded.");
-      }
+  // --- 2. VAPI ENGINE (CDN FIX) ---
+  function loadVapiScript() {
+    if (window.Vapi) {
+      initializeVapiInstance();
+      return;
+    }
 
-      // Initialize Vapi Instance
-      const vapiInstance = new VapiClass(VAPI_PUBLIC_KEY);
+    setVoiceStatus("Loading Voice...")
+    
+    const script = document.createElement("script");
+    script.src = "https://unpkg.com/@vapi-ai/web/dist/vapi.min.js";
+    script.async = true;
+    
+    script.onload = () => {
+      console.log("Vapi Script Loaded!");
+      initializeVapiInstance();
+    };
+
+    script.onerror = () => {
+      setVoiceStatus("Voice Failed (Network Error)");
+    };
+
+    document.body.appendChild(script);
+  }
+
+  function initializeVapiInstance() {
+    try {
+      if (!window.Vapi) throw new Error("Vapi Class not found");
+
+      const vapiInstance = new window.Vapi(VAPI_PUBLIC_KEY);
       vapiRef.current = vapiInstance;
 
-      // Setup Event Listeners
       vapiInstance.on('call-start', () => {
         setIsTalking(true)
         setVoiceStatus('Connected')
@@ -86,56 +104,60 @@ export default function Playground() {
       setVoiceStatus('Ready')
 
     } catch (err) {
-      console.error("Vapi Initialization Failed:", err);
-      setVoiceStatus("Voice unavailable")
+      console.error("VAPI INIT ERROR:", err);
+      setVoiceStatus("Engine Error")
     }
   }
 
-  // --- 2. DATABASE FUNCTIONS (Supabase) ---
+  // --- 3. DATABASE DATA ---
   async function fetchLibraryModels() {
     try {
       const { data: { user } } = await supabase.auth.getUser()
       if (!user) return
-
-      const { data } = await supabase
-        .from('user_models')
-        .select(`ai_models (*)`)
-        .eq('user_id', user.id)
-
+      const { data } = await supabase.from('user_models').select('ai_models (*)').eq('user_id', user.id)
       if (data) {
-        const libraryModels = data.map(item => item.ai_models).filter(Boolean)
-        setModels(libraryModels)
-        if (libraryModels.length > 0 && !selectedModel) {
-          setSelectedModel(libraryModels[0])
-        }
+        const list = data.map(i => i.ai_models).filter(Boolean)
+        setModels(list)
+        if (list.length && !selectedModel) setSelectedModel(list[0])
       }
-    } catch (err) {
-      console.error("Error fetching models:", err)
-    }
+    } catch (e) { console.error(e) }
   }
 
   async function fetchChatHistory() {
     try {
       const { data: { user } } = await supabase.auth.getUser()
       if (!user) return
-
-      const { data } = await supabase
-        .from('chat_history')
-        .select('*')
-        .eq('user_id', user.id)
-        .order('created_at', { ascending: true }) 
-
+      const { data } = await supabase.from('chat_history').select('*').eq('user_id', user.id).order('created_at', { ascending: true })
       if (data) setMessages(data)
-    } catch (err) {
-      console.error("Error fetching history:", err)
+    } catch (e) { console.error(e) }
+  }
+
+  // --- 4. IMAGE HANDLING ---
+  
+  const handleImageSelect = (e) => {
+    const file = e.target.files[0];
+    if (file) {
+      const reader = new FileReader();
+      reader.onloadend = () => {
+        setAttachedImage(reader.result);
+      };
+      reader.readAsDataURL(file);
     }
   }
 
-  // --- 3. USER ACTIONS ---
+  const triggerGallery = () => fileInputRef.current.click();
+  const triggerCamera = () => cameraInputRef.current.click();
+  const removeImage = () => {
+    setAttachedImage(null);
+    if(fileInputRef.current) fileInputRef.current.value = "";
+    if(cameraInputRef.current) cameraInputRef.current.value = "";
+  }
 
+  // --- 5. ACTIONS ---
   const toggleCall = () => {
     if (!vapiRef.current) {
-        alert("Voice engine is still loading. Please wait...");
+        if(!window.Vapi) loadVapiScript();
+        else initializeVapiInstance();
         return;
     }
 
@@ -145,17 +167,15 @@ export default function Playground() {
       setVoiceStatus('Connecting...')
       vapiRef.current.start(VAPI_ASSISTANT_ID)
         .catch(err => {
-             console.error("Call failed:", err);
-             setVoiceStatus("Connection Failed");
-             alert("Could not connect to voice server.");
+             console.error("Call Error:", err);
+             setVoiceStatus("Call Failed");
         });
     }
   }
 
   async function clearChat() {
-    if (!confirm("Delete all chat history?")) return
+    if (!confirm("Delete history?")) return
     const { data: { user } } = await supabase.auth.getUser()
-    
     if (user) {
         await supabase.from('chat_history').delete().eq('user_id', user.id)
         setMessages([])
@@ -164,152 +184,162 @@ export default function Playground() {
 
   async function handleSend(e) {
     e.preventDefault()
-    if (!input.trim() || !selectedModel) return
+    if ((!input.trim() && !attachedImage) || !selectedModel) return
+    
+    const text = input; 
+    const imageToSend = attachedImage; 
 
-    const userText = input
-    setInput('') 
+    setInput(''); 
+    setAttachedImage(null); 
     setLoading(true)
 
     const { data: { user } } = await supabase.auth.getUser()
+    
+    // Create Message Object 
+    const userMsg = { 
+        role: 'user', 
+        content: text, 
+        image: imageToSend 
+    };
 
-    // 1. Save User Message
-    if (user) {
-      await supabase.from('chat_history').insert({
-        user_id: user.id,
-        role: 'user',
-        content: userText,
+    setMessages(p => [...p, userMsg])
+    
+    // Save to DB
+    if (user) await supabase.from('chat_history').insert({
+        user_id: user.id, 
+        role: 'user', 
+        content: text + (imageToSend ? " [Image Sent]" : ""), 
         model_id: selectedModel.id
-      })
-    }
-    setMessages(prev => [...prev, { role: 'user', content: userText }])
+    })
 
     try {
-      // 2. Call AI Engine
       const { data: engineData, error } = await supabase.functions.invoke('chat-engine', {
-        body: { message: userText, model_id: selectedModel.id }
+        body: { message: text, model_id: selectedModel.id }
       })
-
       if (error) throw error
-      const aiReply = engineData.reply
+      const reply = engineData.reply
 
-      // 3. Save AI Response
-      if (user) {
-        await supabase.from('chat_history').insert({
-          user_id: user.id,
-          role: 'ai',
-          content: aiReply,
-          model_id: selectedModel.id
-        })
-      }
-      setMessages(prev => [...prev, { role: 'ai', content: aiReply }])
+      if (user) await supabase.from('chat_history').insert({user_id: user.id, role: 'ai', content: reply, model_id: selectedModel.id})
+      setMessages(p => [...p, { role: 'ai', content: reply }])
 
     } catch (err) {
       console.error(err)
-      setMessages(prev => [...prev, { role: 'system', content: "Error: Failed to get response." }])
+      setMessages(p => [...p, { role: 'system', content: "Error connecting to AI." }])
     } finally {
       setLoading(false)
     }
   }
 
   return (
-    <div className="flex h-[calc(100vh-80px)] bg-slate-950 overflow-hidden">
+    <div className="flex h-[calc(100vh-80px)] bg-slate-950 text-white overflow-hidden">
+      {/* HIDDEN INPUTS FOR CAMERA & GALLERY */}
+      <input 
+        type="file" 
+        accept="image/*" 
+        ref={fileInputRef} 
+        onChange={handleImageSelect} 
+        className="hidden" 
+      />
+      <input 
+        type="file" 
+        accept="image/*" 
+        capture="environment" 
+        ref={cameraInputRef} 
+        onChange={handleImageSelect} 
+        className="hidden" 
+      />
+
       {/* SIDEBAR */}
-      <div className="w-72 border-r border-slate-800 bg-slate-900 p-4 hidden md:flex flex-col">
-        <h2 className="text-slate-400 text-xs font-bold uppercase tracking-wider mb-4 flex items-center justify-between">
-           My Library <Link to="/marketplace" className="text-indigo-400 hover:text-white text-xs">+ Add</Link>
+      <div className="w-72 bg-slate-900 border-r border-slate-800 p-4 hidden md:flex flex-col">
+        <h2 className="text-xs font-bold text-slate-400 mb-4 uppercase flex justify-between">
+           My Library <Link to="/marketplace" className="text-indigo-400">+ Add</Link>
         </h2>
-        <div className="space-y-2 overflow-y-auto flex-1">
-          {models.map(model => (
-            <button
-              key={model.id}
-              onClick={() => setSelectedModel(model)}
-              className={`w-full text-left p-3 rounded-lg transition border ${
-                selectedModel?.id === model.id ? 'bg-indigo-600/20 border-indigo-500 text-white' : 'bg-slate-800/50 border-transparent text-slate-400 hover:bg-slate-800'
-              }`}
-            >
-              <div className="font-medium truncate">{model.name}</div>
-              <div className="text-xs opacity-70">{model.provider || 'AI Agent'}</div>
+        <div className="flex-1 overflow-y-auto space-y-2">
+          {models.map(m => (
+            <button key={m.id} onClick={() => setSelectedModel(m)} className={`w-full text-left p-3 rounded-lg border ${selectedModel?.id === m.id ? 'bg-indigo-900/50 border-indigo-500' : 'border-transparent hover:bg-slate-800'}`}>
+              <div className="font-medium truncate">{m.name}</div>
+              <div className="text-xs text-slate-500">{m.provider}</div>
             </button>
           ))}
         </div>
       </div>
 
-      {/* CHAT INTERFACE */}
+      {/* CHAT AREA */}
       <div className="flex-1 flex flex-col relative">
-        {/* HEADER */}
-        <div className="h-16 border-b border-slate-800 flex items-center justify-between px-6 bg-slate-900/50 backdrop-blur">
+        <div className="h-16 border-b border-slate-800 flex items-center justify-between px-6 bg-slate-900/80 backdrop-blur">
           <div className="flex items-center gap-3">
             <div className={`w-2 h-2 rounded-full ${isTalking ? 'bg-green-400 animate-pulse' : (selectedModel ? 'bg-green-500' : 'bg-red-500')}`} />
             <div>
-              <h3 className="font-bold text-white flex items-center gap-2">
-                {selectedModel ? selectedModel.name : 'Select a Model'}
-              </h3>
-              <p className={`text-xs ${voiceStatus.includes('Error') ? 'text-red-400' : 'text-slate-400'}`}>
+              <h3 className="font-bold">{selectedModel ? selectedModel.name : 'Select Model'}</h3>
+              <p className={`text-xs ${voiceStatus === 'Ready' ? 'text-green-400' : 'text-slate-400'}`}>
                 {voiceStatus}
               </p>
             </div>
           </div>
-          
-          <div className="flex items-center gap-3">
-            <button 
-              onClick={toggleCall}
-              className={`flex items-center gap-2 px-4 py-2 rounded-lg font-medium transition-all ${
-                isTalking 
-                  ? 'bg-red-500/10 text-red-500 border border-red-500/50' 
-                  : 'bg-green-600 text-white hover:bg-green-700 shadow-lg'
-              }`}
-            >
-              {isTalking ? <PhoneOff size={18} /> : <Phone size={18} />}
+          <div className="flex gap-3">
+            <button onClick={toggleCall} className={`flex gap-2 px-4 py-2 rounded-lg font-medium ${isTalking ? 'bg-red-500/20 text-red-500 border-red-500/50' : 'bg-green-600 text-white'}`}>
+              {isTalking ? <PhoneOff size={18}/> : <Phone size={18}/>}
               <span className="hidden sm:inline">{isTalking ? 'End Call' : 'Call Agent'}</span>
             </button>
-
-            <div className="h-6 w-px bg-slate-700 mx-2"></div>
-            <button onClick={clearChat} className="text-slate-400 hover:text-red-400 p-2 hover:bg-slate-800 rounded-lg"><Trash2 size={18} /></button>
+            <button onClick={clearChat} className="p-2 hover:bg-slate-800 rounded text-slate-400"><Trash2 size={18}/></button>
           </div>
         </div>
 
-        {/* MESSAGES AREA */}
-        <div className="flex-1 overflow-y-auto p-6 space-y-6 scroll-smooth">
-          {messages.length === 0 && !isTalking && (
-             <div className="flex flex-col items-center justify-center h-full text-slate-500 opacity-50">
-                <Bot size={48} className="mb-4"/>
-                <p>Start a conversation...</p>
-             </div>
-          )}
-
-          {isTalking && messages.length === 0 && (
-             <div className="flex flex-col items-center justify-center h-full">
-                <div className="w-24 h-24 bg-green-500/10 rounded-full flex items-center justify-center animate-pulse mb-4">
-                  <Mic size={40} className="text-green-500" />
-                </div>
-                <p className="text-slate-300">Listening...</p>
-             </div>
-          )}
-
-          {messages.map((msg, idx) => (
-            <div key={idx} className={`flex gap-4 ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}>
-              {msg.role !== 'user' && <div className="w-8 h-8 rounded-full bg-indigo-600 flex items-center justify-center shrink-0"><Bot size={16} className="text-white" /></div>}
-              <div className={`max-w-[80%] p-4 rounded-2xl whitespace-pre-wrap ${msg.role === 'user' ? 'bg-indigo-600 text-white rounded-br-none' : 'bg-slate-800 text-slate-200 rounded-bl-none border border-slate-700'}`}>
-                {msg.content}
+        {/* MESSAGES LIST */}
+        <div className="flex-1 overflow-y-auto p-6 space-y-6">
+          {messages.map((msg, i) => (
+            <div key={i} className={`flex gap-4 ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}>
+              {msg.role !== 'user' && <div className="w-8 h-8 bg-indigo-600 rounded-full flex items-center justify-center shrink-0"><Bot size={16}/></div>}
+              
+              <div className={`max-w-[80%] p-4 rounded-2xl ${msg.role === 'user' ? 'bg-indigo-600 text-white rounded-br-none' : 'bg-slate-800 text-slate-200 border border-slate-700 rounded-bl-none'}`}>
+                {/* Image Display */}
+                {msg.image && (
+                    <img src={msg.image} alt="Upload" className="max-w-full rounded-lg mb-2 border border-white/20" />
+                )}
+                <div className="whitespace-pre-wrap">{msg.content}</div>
               </div>
-              {msg.role === 'user' && <div className="w-8 h-8 rounded-full bg-slate-700 flex items-center justify-center shrink-0"><User size={16} className="text-slate-300" /></div>}
+              
+              {msg.role === 'user' && <div className="w-8 h-8 bg-slate-700 rounded-full flex items-center justify-center shrink-0"><User size={16}/></div>}
             </div>
           ))}
-          {loading && <div className="text-slate-500 ml-12 text-sm animate-pulse">Thinking...</div>}
           <div ref={messagesEndRef} />
         </div>
 
         {/* INPUT AREA */}
-        <div className="p-4 bg-slate-900 border-t border-slate-800">
-          <form onSubmit={handleSend} className="max-w-4xl mx-auto relative flex items-center gap-4">
+        <div className="p-4 bg-slate-900 border-t border-slate-800 relative">
+          
+          {/* Image Preview */}
+          {attachedImage && (
+            <div className="absolute -top-24 left-4 bg-slate-800 p-2 rounded-lg border border-slate-700 shadow-xl flex items-start gap-2">
+                <img src={attachedImage} alt="Preview" className="h-20 w-20 object-cover rounded" />
+                <button onClick={removeImage} className="bg-red-500 rounded-full p-1 hover:bg-red-600 text-white">
+                    <X size={14} />
+                </button>
+            </div>
+          )}
+
+          <form onSubmit={handleSend} className="max-w-4xl mx-auto flex gap-2 items-center">
+            {/* Gallery Button */}
+            <button type="button" onClick={triggerGallery} className="p-3 bg-slate-800 hover:bg-slate-700 rounded-xl text-slate-400 hover:text-indigo-400 transition" title="Gallery">
+                <ImageIcon size={20} />
+            </button>
+            
+            {/* Camera Button */}
+            <button type="button" onClick={triggerCamera} className="p-3 bg-slate-800 hover:bg-slate-700 rounded-xl text-slate-400 hover:text-indigo-400 transition" title="Camera">
+                <Camera size={20} />
+            </button>
+
             <input 
-              value={input} 
-              onChange={(e) => setInput(e.target.value)} 
-              disabled={loading || !selectedModel || isTalking} 
-              placeholder={isTalking ? "Voice Active..." : "Type a message..."}
-              className="flex-1 bg-slate-950 border border-slate-700 rounded-xl py-4 pl-6 pr-12 text-white focus:border-indigo-500 focus:outline-none disabled:opacity-50" 
+                value={input} 
+                onChange={e => setInput(e.target.value)} 
+                disabled={loading || isTalking} 
+                className="flex-1 bg-slate-950 border border-slate-700 rounded-xl px-4 py-3 text-white focus:border-indigo-500 outline-none placeholder:text-slate-600" 
+                placeholder={isTalking ? "Voice Active..." : "Type message..."}
             />
-            <button type="submit" disabled={!input.trim() || loading || isTalking} className="absolute right-2 p-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg disabled:opacity-50"><Send size={20} /></button>
+            
+            <button type="submit" disabled={(!input.trim() && !attachedImage) || loading} className="bg-indigo-600 hover:bg-indigo-700 px-4 py-3 rounded-xl text-white transition disabled:opacity-50 disabled:cursor-not-allowed">
+                <Send size={20}/>
+            </button>
           </form>
         </div>
       </div>
