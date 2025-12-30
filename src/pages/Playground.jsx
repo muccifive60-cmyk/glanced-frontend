@@ -43,7 +43,7 @@ export default function Playground() {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
   }, [messages])
 
-  // --- VAPI ENGINE ---
+  // --- VAPI ENGINE (FIXED) ---
   function loadVapiScript() {
     if (window.Vapi) {
       initializeVapiInstance()
@@ -67,21 +67,21 @@ export default function Playground() {
       const VapiClass = window.Vapi?.default || window.Vapi
       if (!VapiClass) throw new Error("Vapi constructor not found")
 
-      const vapi = new VapiClass(VAPI_PUBLIC_KEY)
-      vapiRef.current = vapi
+      const vapiInstance = new VapiClass(VAPI_PUBLIC_KEY)
+      vapiRef.current = vapiInstance
 
-      vapi.on('call-start', () => {
+      vapiInstance.on('call-start', () => {
         setIsTalking(true)
         setVoiceStatus('Connected')
       })
 
-      vapi.on('call-end', () => {
+      vapiInstance.on('call-end', () => {
         setIsTalking(false)
         setVoiceStatus('Ready')
       })
 
-      vapi.on('error', (e) => {
-        console.error(e)
+      vapiInstance.on('error', (e) => {
+        console.error("Vapi Error:", e)
         setIsTalking(false)
         setVoiceStatus('Engine Error')
       })
@@ -186,5 +186,128 @@ export default function Playground() {
     }
   }
 
-  return <div className="text-white"> {/* UI yako inaendelea bila mabadiliko */} </div>
+  return (
+    <div className="flex h-[calc(100vh-80px)] bg-slate-950 text-white overflow-hidden">
+      {/* HIDDEN INPUTS */}
+      <input type="file" accept="image/*" ref={fileInputRef} onChange={handleImageSelect} className="hidden" />
+      <input type="file" accept="image/*" capture="environment" ref={cameraInputRef} onChange={handleImageSelect} className="hidden" />
+
+      {/* SIDEBAR */}
+      <div className="w-72 bg-slate-900 border-r border-slate-800 p-4 hidden md:flex flex-col">
+        <h2 className="text-xs font-bold text-slate-400 mb-4 uppercase flex justify-between">
+          My Library <Link to="/marketplace" className="text-indigo-400">+ Add</Link>
+        </h2>
+        <div className="flex-1 overflow-y-auto space-y-2">
+          {models.map(m => (
+            <button
+              key={m.id}
+              onClick={() => setSelectedModel(m)}
+              className={`w-full text-left p-3 rounded-lg border ${
+                selectedModel?.id === m.id
+                  ? 'bg-indigo-900/50 border-indigo-500'
+                  : 'border-transparent hover:bg-slate-800'
+              }`}
+            >
+              <div className="font-medium truncate">{m.name}</div>
+              <div className="text-xs text-slate-500">{m.provider}</div>
+            </button>
+          ))}
+        </div>
+      </div>
+
+      {/* CHAT AREA */}
+      <div className="flex-1 flex flex-col relative">
+        <div className="h-16 border-b border-slate-800 flex items-center justify-between px-6 bg-slate-900/80 backdrop-blur">
+          <div className="flex items-center gap-3">
+            <div className={`w-2 h-2 rounded-full ${
+              isTalking ? 'bg-green-400 animate-pulse' :
+              selectedModel ? 'bg-green-500' : 'bg-red-500'
+            }`} />
+            <div>
+              <h3 className="font-bold">{selectedModel ? selectedModel.name : 'Select Model'}</h3>
+              <p className="text-xs text-slate-400">{voiceStatus}</p>
+            </div>
+          </div>
+
+          <div className="flex gap-3">
+            <button
+              onClick={toggleCall}
+              className={`flex gap-2 px-4 py-2 rounded-lg font-medium ${
+                isTalking
+                  ? 'bg-red-500/20 text-red-500'
+                  : 'bg-green-600 text-white'
+              }`}
+            >
+              {isTalking ? <PhoneOff size={18}/> : <Phone size={18}/>}
+              <span className="hidden sm:inline">
+                {isTalking ? 'End Call' : 'Call Agent'}
+              </span>
+            </button>
+            <button className="p-2 hover:bg-slate-800 rounded text-slate-400">
+              <Trash2 size={18}/>
+            </button>
+          </div>
+        </div>
+
+        {/* MESSAGES */}
+        <div className="flex-1 overflow-y-auto p-6 space-y-6">
+          {messages.map((msg, i) => (
+            <div key={i} className={`flex gap-4 ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}>
+              {msg.role !== 'user' && (
+                <div className="w-8 h-8 bg-indigo-600 rounded-full flex items-center justify-center">
+                  <Bot size={16}/>
+                </div>
+              )}
+
+              <div className={`max-w-[80%] p-4 rounded-2xl ${
+                msg.role === 'user'
+                  ? 'bg-indigo-600 rounded-br-none'
+                  : 'bg-slate-800 border border-slate-700 rounded-bl-none'
+              }`}>
+                {msg.image && (
+                  <img src={msg.image} className="max-w-full rounded-lg mb-2" />
+                )}
+                <div className="whitespace-pre-wrap">{msg.content}</div>
+              </div>
+
+              {msg.role === 'user' && (
+                <div className="w-8 h-8 bg-slate-700 rounded-full flex items-center justify-center">
+                  <User size={16}/>
+                </div>
+              )}
+            </div>
+          ))}
+          <div ref={messagesEndRef} />
+        </div>
+
+        {/* INPUT */}
+        <div className="p-4 bg-slate-900 border-t border-slate-800">
+          <form onSubmit={handleSend} className="flex gap-2 items-center">
+            <button type="button" onClick={() => fileInputRef.current.click()} className="p-3 bg-slate-800 rounded-xl">
+              <ImageIcon size={20}/>
+            </button>
+            <button type="button" onClick={() => cameraInputRef.current.click()} className="p-3 bg-slate-800 rounded-xl">
+              <Camera size={20}/>
+            </button>
+
+            <input
+              value={input}
+              onChange={e => setInput(e.target.value)}
+              disabled={loading || isTalking}
+              className="flex-1 bg-slate-950 border border-slate-700 rounded-xl px-4 py-3"
+              placeholder={isTalking ? "Voice Active..." : "Type message..."}
+            />
+
+            <button
+              type="submit"
+              disabled={loading}
+              className="bg-indigo-600 px-4 py-3 rounded-xl"
+            >
+              <Send size={20}/>
+            </button>
+          </form>
+        </div>
+      </div>
+    </div>
+  )
 }
