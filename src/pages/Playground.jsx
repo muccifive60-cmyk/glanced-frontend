@@ -2,18 +2,12 @@ import { useState, useEffect, useRef } from 'react'
 import { supabase } from '../supabaseClient'
 import { Send, Bot, User, Trash2, Link as LinkIcon, Phone, PhoneOff, Mic } from 'lucide-react'
 import { Link } from 'react-router-dom'
-// FIX: Import Vapi as a module to prevent "Object is not a constructor" error
-import * as VapiSDK from '@vapi-ai/web'
 
-// FIX: Handle default export compatibility
-const Vapi = VapiSDK.default || VapiSDK;
-
-// Initialize Vapi instance using the VITE environment variable
-const vapiKey = import.meta.env.VITE_VAPI_PUBLIC_KEY;
-const vapi = new Vapi(vapiKey);
+// NOTE: We removed the top-level Vapi import to prevent the "White Screen" crash.
+// Vapi will be loaded dynamically inside useEffect.
 
 export default function Playground() {
-  // --- EXISTING STATE (Text & Database) ---
+  // --- STATE MANAGEMENT ---
   const [models, setModels] = useState([])
   const [selectedModel, setSelectedModel] = useState(null)
   const [messages, setMessages] = useState([])
@@ -21,35 +15,23 @@ export default function Playground() {
   const [loading, setLoading] = useState(false)
   const messagesEndRef = useRef(null)
 
-  // --- NEW STATE (Voice) ---
+  // --- VOICE STATE ---
   const [isTalking, setIsTalking] = useState(false)
   const [voiceStatus, setVoiceStatus] = useState('')
+  // We use a Ref to hold the Vapi instance so it doesn't cause re-renders or crashes
+  const vapiRef = useRef(null);
 
   // --- 1. INITIALIZATION & EFFECTS ---
   useEffect(() => {
     fetchLibraryModels()
     fetchChatHistory()
-
-    // Vapi Event Listeners
-    vapi.on('call-start', () => {
-      setIsTalking(true)
-      setVoiceStatus('Voice Connected')
-    })
-
-    vapi.on('call-end', () => {
-      setIsTalking(false)
-      setVoiceStatus('')
-    })
-
-    vapi.on('error', (e) => {
-      console.error("Vapi Error:", e)
-      setVoiceStatus('Connection Error')
-      setIsTalking(false)
-    })
+    initializeVapi()
 
     // Cleanup when component unmounts
     return () => {
-      vapi.stop() 
+      if (vapiRef.current) {
+        vapiRef.current.stop()
+      }
     }
   }, [])
 
@@ -61,20 +43,57 @@ export default function Playground() {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
   }
 
-  // --- 2. DATA FETCHING (Supabase) ---
+  // --- SAFE VAPI LOADING (The Fix) ---
+  async function initializeVapi() {
+    try {
+      // Import Vapi only when the page is ready
+      const VapiModule = await import('@vapi-ai/web');
+      const VapiClass = VapiModule.default || VapiModule;
+      
+      const vapiKey = import.meta.env.VITE_VAPI_PUBLIC_KEY;
+      if (!vapiKey) {
+        console.error("VITE_VAPI_PUBLIC_KEY is missing!");
+        return;
+      }
 
-  // Fetch models from the User's Library
+      // Initialize
+      const vapiInstance = new VapiClass(vapiKey);
+      vapiRef.current = vapiInstance;
+
+      // Event Listeners
+      vapiInstance.on('call-start', () => {
+        setIsTalking(true)
+        setVoiceStatus('Voice Connected')
+      })
+
+      vapiInstance.on('call-end', () => {
+        setIsTalking(false)
+        setVoiceStatus('')
+      })
+
+      vapiInstance.on('error', (e) => {
+        console.error("Vapi Error:", e)
+        setVoiceStatus('Connection Error')
+        setIsTalking(false)
+      })
+      
+      console.log("Vapi Initialized Successfully");
+
+    } catch (err) {
+      console.error("Failed to load Vapi:", err);
+      // We don't set error status here to avoid scaring the user, 
+      // the chat will still work even if voice fails.
+    }
+  }
+
+  // --- 2. DATA FETCHING (Supabase) ---
   async function fetchLibraryModels() {
     const { data: { user } } = await supabase.auth.getUser()
     if (!user) return
 
     const { data, error } = await supabase
       .from('user_models')
-      .select(`
-        ai_models (
-          *
-        )
-      `)
+      .select(`ai_models (*)`)
       .eq('user_id', user.id)
 
     if (error) {
@@ -83,18 +102,14 @@ export default function Playground() {
     }
 
     if (data) {
-      // Flatten the structure: user_models -> ai_models
       const libraryModels = data.map(item => item.ai_models).filter(Boolean)
       setModels(libraryModels)
-      
-      // Auto-select the first model if none selected
       if (libraryModels.length > 0 && !selectedModel) {
         setSelectedModel(libraryModels[0])
       }
     }
   }
 
-  // Load Previous Chats
   async function fetchChatHistory() {
     const { data: { user } } = await supabase.auth.getUser()
     if (!user) return
@@ -110,40 +125,43 @@ export default function Playground() {
 
   // --- 3. ACTIONS ---
 
-  // Voice Call Toggle
   const toggleCall = () => {
+    if (!vapiRef.current) {
+      alert("Voice service is still loading or failed to connect. Please refresh.");
+      return;
+    }
+
     if (isTalking) {
-      vapi.stop()
+      vapiRef.current.stop()
     } else {
       setVoiceStatus('Connecting...')
-      // Using a default Assistant ID if none is provided
-      vapi.start('be1bcb56-7536-493b-bd99-52e041d8e950')
+      vapiRef.current.start('be1bcb56-7536-493b-bd99-52e041d8e950')
+        .catch(err => {
+             console.error("Call failed:", err);
+             setVoiceStatus("Call Failed");
+        });
     }
   }
 
-  // Clear Chat Function
   async function clearChat() {
     if (!confirm("Delete all chat history?")) return
     const { data: { user } } = await supabase.auth.getUser()
-    
     if (user) {
         await supabase.from('chat_history').delete().eq('user_id', user.id)
         setMessages([])
     }
   }
 
-  // Send Text Message Function
   async function handleSend(e) {
     e.preventDefault()
     if (!input.trim() || !selectedModel) return
 
     const userText = input
-    setInput('') // Clear input immediately
+    setInput('') 
     setLoading(true)
 
     const { data: { user } } = await supabase.auth.getUser()
 
-    // Save User Message to DB
     if (user) {
       await supabase.from('chat_history').insert({
         user_id: user.id,
@@ -153,11 +171,9 @@ export default function Playground() {
       })
     }
 
-    // Update UI immediately
     setMessages(prev => [...prev, { role: 'user', content: userText }])
 
     try {
-      // Call AI Engine (Supabase Edge Function)
       const { data: engineData, error } = await supabase.functions.invoke('chat-engine', {
         body: { message: userText, model_id: selectedModel.id }
       })
@@ -166,7 +182,6 @@ export default function Playground() {
 
       const aiReply = engineData.reply
 
-      // Save AI Reply to DB
       if (user) {
         await supabase.from('chat_history').insert({
           user_id: user.id,
@@ -237,7 +252,6 @@ export default function Playground() {
           </div>
           
           <div className="flex items-center gap-3">
-            {/* Call Button */}
             <button 
               onClick={toggleCall}
               className={`flex items-center gap-2 px-4 py-2 rounded-lg font-medium transition-all ${
@@ -267,7 +281,6 @@ export default function Playground() {
              </div>
           )}
 
-          {/* Voice Active Indicator for empty state */}
           {isTalking && messages.length === 0 && (
              <div className="flex flex-col items-center justify-center h-full">
                 <div className="w-24 h-24 bg-green-500/10 rounded-full flex items-center justify-center animate-pulse mb-4">
