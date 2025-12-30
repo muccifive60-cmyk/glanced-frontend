@@ -3,8 +3,7 @@ import { supabase } from '../supabaseClient'
 import { Send, Bot, User, Trash2, Phone, PhoneOff, Camera, Image as ImageIcon, X } from 'lucide-react'
 import { Link } from 'react-router-dom'
 
-// NOTE: We use CDN injection for Vapi to avoid "Constructor" build errors.
-// Images are converted to Base64 for immediate preview.
+// NOTE: Switched to jsDelivr CDN for better stability.
 
 export default function Playground() {
   // --- STATE MANAGEMENT ---
@@ -27,7 +26,7 @@ export default function Playground() {
   const messagesEndRef = useRef(null)
   const vapiRef = useRef(null)
 
-  // --- KEYS (Hardcoded for stability) ---
+  // --- KEYS ---
   const VAPI_PUBLIC_KEY = "150fa8ac-12a5-48fb-934f-0a9bbadc2da7";
   const VAPI_ASSISTANT_ID = "be1bcb56-7536-493b-bd99-52e041d8e950";
 
@@ -36,7 +35,7 @@ export default function Playground() {
     fetchLibraryModels()
     fetchChatHistory()
     
-    // Load Voice Engine via CDN
+    // Load Voice Engine
     loadVapiScript()
 
     return () => {
@@ -52,26 +51,28 @@ export default function Playground() {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
   }
 
-  // --- 2. VAPI ENGINE (CDN FIX) ---
+  // --- 2. VAPI ENGINE (NEW CDN LINK) ---
   function loadVapiScript() {
     if (window.Vapi) {
       initializeVapiInstance();
       return;
     }
 
-    setVoiceStatus("Loading Voice...")
+    setVoiceStatus("Downloading Engine...")
     
     const script = document.createElement("script");
-    script.src = "https://unpkg.com/@vapi-ai/web/dist/vapi.min.js";
+    // Switched to jsDelivr for better reliability
+    script.src = "https://cdn.jsdelivr.net/npm/@vapi-ai/web@latest/dist/vapi.min.js";
     script.async = true;
     
     script.onload = () => {
-      console.log("Vapi Script Loaded!");
+      console.log("Vapi Script Loaded via jsDelivr!");
       initializeVapiInstance();
     };
 
     script.onerror = () => {
-      setVoiceStatus("Voice Failed (Network Error)");
+      console.error("Failed to load Vapi script.");
+      setVoiceStatus("Network Error (Check Internet)");
     };
 
     document.body.appendChild(script);
@@ -133,7 +134,6 @@ export default function Playground() {
   }
 
   // --- 4. IMAGE HANDLING ---
-  
   const handleImageSelect = (e) => {
     const file = e.target.files[0];
     if (file) {
@@ -232,22 +232,9 @@ export default function Playground() {
 
   return (
     <div className="flex h-[calc(100vh-80px)] bg-slate-950 text-white overflow-hidden">
-      {/* HIDDEN INPUTS FOR CAMERA & GALLERY */}
-      <input 
-        type="file" 
-        accept="image/*" 
-        ref={fileInputRef} 
-        onChange={handleImageSelect} 
-        className="hidden" 
-      />
-      <input 
-        type="file" 
-        accept="image/*" 
-        capture="environment" 
-        ref={cameraInputRef} 
-        onChange={handleImageSelect} 
-        className="hidden" 
-      />
+      {/* HIDDEN INPUTS */}
+      <input type="file" accept="image/*" ref={fileInputRef} onChange={handleImageSelect} className="hidden" />
+      <input type="file" accept="image/*" capture="environment" ref={cameraInputRef} onChange={handleImageSelect} className="hidden" />
 
       {/* SIDEBAR */}
       <div className="w-72 bg-slate-900 border-r border-slate-800 p-4 hidden md:flex flex-col">
@@ -290,15 +277,10 @@ export default function Playground() {
           {messages.map((msg, i) => (
             <div key={i} className={`flex gap-4 ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}>
               {msg.role !== 'user' && <div className="w-8 h-8 bg-indigo-600 rounded-full flex items-center justify-center shrink-0"><Bot size={16}/></div>}
-              
               <div className={`max-w-[80%] p-4 rounded-2xl ${msg.role === 'user' ? 'bg-indigo-600 text-white rounded-br-none' : 'bg-slate-800 text-slate-200 border border-slate-700 rounded-bl-none'}`}>
-                {/* Image Display */}
-                {msg.image && (
-                    <img src={msg.image} alt="Upload" className="max-w-full rounded-lg mb-2 border border-white/20" />
-                )}
+                {msg.image && <img src={msg.image} alt="Upload" className="max-w-full rounded-lg mb-2 border border-white/20" />}
                 <div className="whitespace-pre-wrap">{msg.content}</div>
               </div>
-              
               {msg.role === 'user' && <div className="w-8 h-8 bg-slate-700 rounded-full flex items-center justify-center shrink-0"><User size={16}/></div>}
             </div>
           ))}
@@ -307,39 +289,19 @@ export default function Playground() {
 
         {/* INPUT AREA */}
         <div className="p-4 bg-slate-900 border-t border-slate-800 relative">
-          
-          {/* Image Preview */}
           {attachedImage && (
             <div className="absolute -top-24 left-4 bg-slate-800 p-2 rounded-lg border border-slate-700 shadow-xl flex items-start gap-2">
                 <img src={attachedImage} alt="Preview" className="h-20 w-20 object-cover rounded" />
-                <button onClick={removeImage} className="bg-red-500 rounded-full p-1 hover:bg-red-600 text-white">
-                    <X size={14} />
-                </button>
+                <button onClick={removeImage} className="bg-red-500 rounded-full p-1 hover:bg-red-600 text-white"><X size={14} /></button>
             </div>
           )}
-
           <form onSubmit={handleSend} className="max-w-4xl mx-auto flex gap-2 items-center">
-            {/* Gallery Button */}
-            <button type="button" onClick={triggerGallery} className="p-3 bg-slate-800 hover:bg-slate-700 rounded-xl text-slate-400 hover:text-indigo-400 transition" title="Gallery">
-                <ImageIcon size={20} />
-            </button>
-            
-            {/* Camera Button */}
-            <button type="button" onClick={triggerCamera} className="p-3 bg-slate-800 hover:bg-slate-700 rounded-xl text-slate-400 hover:text-indigo-400 transition" title="Camera">
-                <Camera size={20} />
-            </button>
+            <button type="button" onClick={triggerGallery} className="p-3 bg-slate-800 hover:bg-slate-700 rounded-xl text-slate-400 hover:text-indigo-400 transition"><ImageIcon size={20} /></button>
+            <button type="button" onClick={triggerCamera} className="p-3 bg-slate-800 hover:bg-slate-700 rounded-xl text-slate-400 hover:text-indigo-400 transition"><Camera size={20} /></button>
 
-            <input 
-                value={input} 
-                onChange={e => setInput(e.target.value)} 
-                disabled={loading || isTalking} 
-                className="flex-1 bg-slate-950 border border-slate-700 rounded-xl px-4 py-3 text-white focus:border-indigo-500 outline-none placeholder:text-slate-600" 
-                placeholder={isTalking ? "Voice Active..." : "Type message..."}
-            />
+            <input value={input} onChange={e => setInput(e.target.value)} disabled={loading || isTalking} className="flex-1 bg-slate-950 border border-slate-700 rounded-xl px-4 py-3 text-white focus:border-indigo-500 outline-none placeholder:text-slate-600" placeholder={isTalking ? "Voice Active..." : "Type message..."} />
             
-            <button type="submit" disabled={(!input.trim() && !attachedImage) || loading} className="bg-indigo-600 hover:bg-indigo-700 px-4 py-3 rounded-xl text-white transition disabled:opacity-50 disabled:cursor-not-allowed">
-                <Send size={20}/>
-            </button>
+            <button type="submit" disabled={(!input.trim() && !attachedImage) || loading} className="bg-indigo-600 hover:bg-indigo-700 px-4 py-3 rounded-xl text-white transition disabled:opacity-50 disabled:cursor-not-allowed"><Send size={20}/></button>
           </form>
         </div>
       </div>
