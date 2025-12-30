@@ -2,23 +2,28 @@ import { useState, useEffect, useRef } from 'react'
 import { supabase } from '../supabaseClient'
 import { Send, Bot, User, Trash2, Link as LinkIcon, Phone, PhoneOff, Mic } from 'lucide-react'
 import { Link } from 'react-router-dom'
-import Vapi from '@vapi-ai/web'
+import * as VapiSDK from '@vapi-ai/web'
 
-// Initialize Vapi instance using the environment variable
-const vapi = new Vapi(import.meta.env.VITE_VAPI_PUBLIC_KEY);
+// Fix for "Object is not a constructor" error in Vite
+const Vapi = VapiSDK.default || VapiSDK;
+
+// Initialize Vapi instance using the VITE environment variable
+const vapiKey = import.meta.env.VITE_VAPI_PUBLIC_KEY || '';
+const vapi = new Vapi(vapiKey);
 
 export default function Playground() {
-  // --- EXISTING STATE (Text & Database) ---
+  // --- STATE MANAGEMENT ---
   const [models, setModels] = useState([])
   const [selectedModel, setSelectedModel] = useState(null)
   const [messages, setMessages] = useState([])
   const [input, setInput] = useState('')
   const [loading, setLoading] = useState(false)
-  const messagesEndRef = useRef(null)
-
-  // --- NEW STATE (Voice) ---
+  
+  // Voice State
   const [isTalking, setIsTalking] = useState(false)
   const [voiceStatus, setVoiceStatus] = useState('')
+  
+  const messagesEndRef = useRef(null)
 
   // --- 1. INITIALIZATION & EFFECTS ---
   useEffect(() => {
@@ -37,7 +42,7 @@ export default function Playground() {
     })
 
     vapi.on('error', (e) => {
-      console.error(e)
+      console.error("Vapi Error:", e)
       setVoiceStatus('Connection Error')
       setIsTalking(false)
     })
@@ -48,6 +53,7 @@ export default function Playground() {
     }
   }, [])
 
+  // Auto-scroll to bottom when messages change
   useEffect(() => {
     scrollToBottom()
   }, [messages])
@@ -63,6 +69,7 @@ export default function Playground() {
     const { data: { user } } = await supabase.auth.getUser()
     if (!user) return
 
+    // NO LIMIT - Fetching ALL agents as requested
     const { data, error } = await supabase
       .from('user_models')
       .select(`
@@ -71,7 +78,7 @@ export default function Playground() {
         )
       `)
       .eq('user_id', user.id)
-
+      
     if (error) {
       console.error('Error fetching library:', error)
       return
@@ -82,6 +89,7 @@ export default function Playground() {
       const libraryModels = data.map(item => item.ai_models).filter(Boolean)
       setModels(libraryModels)
       
+      // Auto-select the first model if none selected
       if (libraryModels.length > 0 && !selectedModel) {
         setSelectedModel(libraryModels[0])
       }
@@ -97,8 +105,9 @@ export default function Playground() {
       .from('chat_history')
       .select('*')
       .eq('user_id', user.id)
-      .order('created_at', { ascending: true }) 
-
+      .order('created_at', { ascending: true })
+      // Limit removed for chat history as well, though usually recommended
+      
     if (data) setMessages(data)
   }
 
@@ -106,12 +115,24 @@ export default function Playground() {
 
   // Voice Call Toggle
   const toggleCall = () => {
+    if (!selectedModel) {
+      alert("Please select a model first.")
+      return
+    }
+
     if (isTalking) {
       vapi.stop()
     } else {
       setVoiceStatus('Connecting...')
-      // Using the Demo Assistant ID for Vapi
-      vapi.start('be1bcb56-7536-493b-bd99-52e041d8e950')
+      
+      // Use a default/demo Assistant ID
+      const assistantId = 'be1bcb56-7536-493b-bd99-52e041d8e950'; 
+      
+      vapi.start(assistantId)
+        .catch(err => {
+          console.error("Failed to start call:", err)
+          setVoiceStatus("Failed to connect")
+        })
     }
   }
 
@@ -120,8 +141,10 @@ export default function Playground() {
     if (!confirm("Delete all chat history?")) return
     const { data: { user } } = await supabase.auth.getUser()
     
-    await supabase.from('chat_history').delete().eq('user_id', user.id)
-    setMessages([])
+    if (user) {
+      await supabase.from('chat_history').delete().eq('user_id', user.id)
+      setMessages([])
+    }
   }
 
   // Send Text Message Function
@@ -135,7 +158,7 @@ export default function Playground() {
 
     const { data: { user } } = await supabase.auth.getUser()
 
-    // Save User Message to DB
+    // 1. Save User Message to DB
     if (user) {
       await supabase.from('chat_history').insert({
         user_id: user.id,
@@ -149,7 +172,7 @@ export default function Playground() {
     setMessages(prev => [...prev, { role: 'user', content: userText }])
 
     try {
-      // Call AI Engine (Supabase Edge Function)
+      // 2. Call AI Engine (Supabase Edge Function)
       const { data: engineData, error } = await supabase.functions.invoke('chat-engine', {
         body: { message: userText, model_id: selectedModel.id }
       })
@@ -158,7 +181,7 @@ export default function Playground() {
 
       const aiReply = engineData.reply
 
-      // Save AI Reply to DB
+      // 3. Save AI Reply to DB
       if (user) {
         await supabase.from('chat_history').insert({
           user_id: user.id,
@@ -172,7 +195,7 @@ export default function Playground() {
 
     } catch (err) {
       console.error(err)
-      setMessages(prev => [...prev, { role: 'system', content: "Error: Failed to get response." }])
+      setMessages(prev => [...prev, { role: 'system', content: "Error: Failed to get response from AI Agent." }])
     } finally {
       setLoading(false)
     }
@@ -232,10 +255,11 @@ export default function Playground() {
             {/* Call Button */}
             <button 
               onClick={toggleCall}
+              disabled={!selectedModel}
               className={`flex items-center gap-2 px-4 py-2 rounded-lg font-medium transition-all ${
                 isTalking 
                   ? 'bg-red-500/10 text-red-500 hover:bg-red-500/20 border border-red-500/50' 
-                  : 'bg-green-600 text-white hover:bg-green-700 shadow-lg shadow-green-900/20'
+                  : 'bg-green-600 text-white hover:bg-green-700 shadow-lg shadow-green-900/20 disabled:opacity-50 disabled:cursor-not-allowed'
               }`}
             >
               {isTalking ? <PhoneOff size={18} /> : <Phone size={18} />}
