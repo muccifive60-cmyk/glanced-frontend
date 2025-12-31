@@ -1,6 +1,7 @@
+
 import { useState, useEffect, useRef } from 'react'
 import { supabase } from '../supabaseClient'
-import Vapi from '@vapi-ai/web'
+import * as VapiSDK from '@vapi-ai/web' // <--- SMART IMPORT (Tunachukua kila kitu)
 import {
   Send, Bot, User, Trash2, Phone, PhoneOff, Camera, Image as ImageIcon, X, Menu, AlertCircle
 } from 'lucide-react'
@@ -33,17 +34,24 @@ export default function Playground() {
   const VAPI_PUBLIC_KEY = '150fa8ac-12a5-48fb-934f-0a9bbadc2da7'
   const VAPI_ASSISTANT_ID = 'be1bcb56-7536-493b-bd99-52e041d8e950'
 
-  // ------------------ INIT ------------------
+  // ------------------ INIT (FIXED) ------------------
   useEffect(() => {
     addLog("App Mounted. Starting Init...")
     fetchLibraryModels()
     fetchChatHistory()
     
     try {
-        addLog("Initializing Vapi SDK...")
-        const vapi = new Vapi(VAPI_PUBLIC_KEY)
+        addLog("Inspecting Vapi Package...")
+        
+        // SMART CONSTRUCTOR FINDER
+        // Tunajaribu kutafuta Class ilipo: .Vapi (Named), .default (Default), au yenyewe (Module)
+        const VapiClass = VapiSDK.Vapi || VapiSDK.default || VapiSDK
+        
+        addLog(`Constructor Found: ${!!VapiClass}`)
+        
+        const vapi = new VapiClass(VAPI_PUBLIC_KEY)
         vapiRef.current = vapi
-        addLog("Vapi Instance Created.")
+        addLog("Vapi Instance Created Successfully ✅")
 
         vapi.on('call-start', () => { 
             addLog("Event: Call Started")
@@ -56,16 +64,16 @@ export default function Playground() {
             setVoiceStatus('Ready') 
         })
         vapi.on('error', (e) => { 
-            addLog(`Vapi Error Event: ${JSON.stringify(e)}`)
+            addLog(`Vapi Error: ${JSON.stringify(e)}`)
             console.error('Vapi Error:', e)
             setIsTalking(false)
             setVoiceStatus('Engine Error') 
         })
 
         setVoiceStatus('Ready')
-        addLog("Vapi Setup Complete. Status: Ready")
+        addLog("System Ready. Waiting for user...")
     } catch (err) {
-        addLog(`CRITICAL INIT ERROR: ${err.message}`)
+        addLog(`CRITICAL FIX FAILED: ${err.message}`)
         console.error("Vapi Init Error:", err)
         setVoiceStatus("System Error")
     }
@@ -89,7 +97,7 @@ export default function Playground() {
 
   async function fetchChatHistory() { /* ... existing logic ... */ }
 
-  // ------------------ CALL LOGIC (DEBUGGED) ------------------
+  // ------------------ CALL LOGIC ------------------
   const toggleCall = async () => {
     addLog("Button Clicked: toggleCall")
     
@@ -107,8 +115,6 @@ export default function Playground() {
         addLog("Action: Starting Call...")
         
         const rawUrl = import.meta.env.VITE_SUPABASE_URL
-        addLog(`Supabase URL found: ${!!rawUrl}`) // True/False check
-        
         const cleanUrl = rawUrl ? rawUrl.replace(/\/$/, '') : null
         const functionUrl = cleanUrl ? `${cleanUrl}/functions/v1/chat-engine` : null
         
@@ -118,12 +124,9 @@ export default function Playground() {
              return
         }
 
-        addLog(`Target URL: ...${functionUrl.slice(-20)}`) // Show last part of URL
-
         const { data: { user } } = await supabase.auth.getUser()
-        addLog(`User ID: ${user?.id || 'None'}`)
+        addLog(`Target: Supabase Edge Function`)
 
-        addLog("Calling vapi.start()...")
         await vapiRef.current.start(VAPI_ASSISTANT_ID, {
             serverUrl: functionUrl,
             variableValues: {
@@ -131,7 +134,7 @@ export default function Playground() {
                 modelId: selectedModel?.id
             }
         })
-        addLog("vapi.start() executed.")
+        addLog("Request Sent to Supabase.")
       } catch (err) {
         addLog(`START ERROR: ${err.message}`)
         console.error('Vapi start error:', err)
@@ -147,12 +150,10 @@ export default function Playground() {
 
   return (
     <div className="flex h-[calc(100vh-80px)] bg-slate-950 text-white overflow-hidden relative">
-      {/* ... hidden inputs ... */}
-      
-      {/* DEBUG BOX (Hii itatuonyesha tatizo) */}
-      <div className="absolute top-0 left-0 right-0 bg-slate-900/90 z-40 p-2 text-[10px] font-mono border-b border-red-500 max-h-32 overflow-y-auto">
-        <div className="flex justify-between text-red-400 font-bold sticky top-0 bg-slate-900/90">
-            <span>🕵️ DETECTIVE MODE (Logs)</span>
+      {/* DEBUG BOX */}
+      <div className="absolute top-0 left-0 right-0 bg-slate-900/90 z-40 p-2 text-[10px] font-mono border-b border-green-500 max-h-32 overflow-y-auto">
+        <div className="flex justify-between text-green-400 font-bold sticky top-0 bg-slate-900/90">
+            <span>🕵️ DETECTIVE MODE (Fixing...)</span>
             <button onClick={() => setLogs([])}>Clear</button>
         </div>
         {logs.map((log, i) => <div key={i} className="border-b border-slate-800 py-1">{log}</div>)}
@@ -161,26 +162,34 @@ export default function Playground() {
       {/* MOBILE MENU */}
       {isSidebarOpen && (
         <div className="absolute inset-0 z-50 bg-slate-900/95 p-4 flex flex-col md:hidden pt-36">
-           {/* ... menu content ... */}
-            <button onClick={() => setIsSidebarOpen(false)} className="absolute top-4 right-4 p-2"><X/></button>
-             {/* ... */}
+           <div className="flex justify-between items-center mb-6 border-b border-slate-800 pb-4">
+                <h2 className="font-bold text-lg text-indigo-400">Select Agent</h2>
+                <button onClick={() => setIsSidebarOpen(false)} className="p-2 bg-slate-800 rounded-full text-white"><X size={24}/></button>
+            </div>
+            <div className="flex-1 overflow-y-auto space-y-3">
+                {models.map(m => (
+                    <button key={m.id} onClick={() => { setSelectedModel(m); setIsSidebarOpen(false); }} className={`w-full text-left p-4 rounded-xl border ${selectedModel?.id === m.id ? 'bg-indigo-600 border-indigo-400' : 'bg-slate-800 border-transparent'}`}>
+                        <div className="font-bold text-lg">{m.name}</div>
+                        <div className="text-sm opacity-70">{m.provider}</div>
+                    </button>
+                ))}
+            </div>
         </div>
       )}
 
       {/* DESKTOP SIDEBAR */}
       <div className="w-72 bg-slate-900 border-r border-slate-800 p-4 hidden md:flex flex-col">
-         {/* ... sidebar content ... */}
+         <h2 className="text-xs font-bold text-slate-400 mb-4 uppercase">My Library</h2>
          {models.map(m => (
-            <button key={m.id} onClick={() => setSelectedModel(m)} className="p-2 text-left border border-slate-700 mb-2 rounded">
+            <button key={m.id} onClick={() => setSelectedModel(m)} className={`w-full text-left p-3 rounded-lg border mb-2 ${selectedModel?.id === m.id ? 'bg-indigo-900/50 border-indigo-500' : 'border-transparent hover:bg-slate-800'}`}>
                 {m.name}
             </button>
          ))}
       </div>
 
       {/* CHAT AREA */}
-      <div className="flex-1 flex flex-col relative w-full pt-32 md:pt-0"> {/* Padding top for debug box */}
+      <div className="flex-1 flex flex-col relative w-full pt-32 md:pt-0">
         <div className="h-16 border-b border-slate-800 flex items-center justify-between px-4 bg-slate-900">
-           {/* ... header ... */}
            <div className="flex items-center gap-3">
               <button onClick={() => setIsSidebarOpen(true)} className="md:hidden"><Menu/></button>
               <div>
@@ -197,12 +206,16 @@ export default function Playground() {
 
         {/* MESSAGES */}
         <div className="flex-1 overflow-y-auto p-4">
-           {/* ... messages ... */}
+           {/* Placeholder for messages */}
+           {messages.length === 0 && <div className="text-slate-500 text-center mt-10">Select a model to chat</div>}
+           {messages.map((msg, i) => (
+             <div key={i} className="mb-4 p-2 bg-slate-800 rounded">{msg.content}</div>
+           ))}
         </div>
 
         {/* INPUT */}
         <div className="p-4 bg-slate-900">
-           {/* ... input form ... */}
+           <input className="w-full bg-slate-800 p-3 rounded text-white" placeholder="Type message..." disabled />
         </div>
       </div>
     </div>
