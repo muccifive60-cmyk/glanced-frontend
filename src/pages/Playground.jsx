@@ -30,13 +30,13 @@ export default function Playground() {
   const selectedModelRef = useRef(null)
 
   // ==================================================================================
-  // ⚠️ CONFIGURATION (HARDCODED)
+  // ⚠️ CONFIGURATION (HARDCODED KEYS)
   const VAPI_PUBLIC_KEY = '150fa8ac-12a5-48fb-934f-0a9bbadc2da7'
   const VAPI_ASSISTANT_ID = 'Be1bcb56-7536-493b-bca9-3261cf8e11b6'
   const MY_SUPABASE_URL = 'https://hveyemdkojlijcesvtkt.supabase.co' 
   // ==================================================================================
 
-  // 🔥 Sync Ref with State (Ensures listener gets the correct model)
+  // 🔥 Sync Ref with State
   useEffect(() => {
     selectedModelRef.current = selectedModel
   }, [selectedModel])
@@ -84,7 +84,7 @@ export default function Playground() {
             // 2. Save to DB (Background)
             try {
                 const { data: { user } } = await supabase.auth.getUser()
-                const currentModel = selectedModelRef.current // Using Ref here!
+                const currentModel = selectedModelRef.current 
                 
                 if (user && currentModel) {
                     await supabase.from('chat_history').insert({
@@ -100,11 +100,22 @@ export default function Playground() {
           }
         })
 
+        // 🔥 ERROR HANDLING: Detailed JSON view
         vapi.on('error', (e) => {
           console.error('Vapi Error Event:', e)
-          const errorMessage = e.error?.message || e.message || JSON.stringify(e)
+          
+          let errorMsg = "Unknown Error";
+          try {
+             if (typeof e === 'string') errorMsg = e;
+             else if (e.message) errorMsg = e.message;
+             else if (e.error && e.error.message) errorMsg = e.error.message;
+             else errorMsg = JSON.stringify(e);
+          } catch (jsonErr) {
+             errorMsg = "Unparseable Error Object";
+          }
+
           setIsTalking(false)
-          setVoiceStatus(`Err: ${errorMessage}`)
+          setVoiceStatus(`Err: ${errorMsg.substring(0, 50)}`)
         })
 
         setVoiceStatus('Ready')
@@ -120,7 +131,7 @@ export default function Playground() {
     return () => {
       if (vapiRef.current) {
         vapiRef.current.stop()
-        vapiRef.current.removeAllListeners() // Remove all listeners
+        vapiRef.current.removeAllListeners() 
       }
     }
   }, [])
@@ -183,11 +194,10 @@ export default function Playground() {
     if (cameraInputRef.current) cameraInputRef.current.value = ''
   }
 
-  // ------------------ CALL LOGIC ------------------
+  // ------------------ CALL LOGIC (FIXED: REMOVED SERVER URL) ------------------
   const toggleCall = async () => {
     if (!vapiRef.current) return
 
-    // 🔥 FIX B: Prevent Call if no Model is selected
     if (!selectedModel && !isTalking) {
         alert("Please select an AI Agent from the library first!")
         return
@@ -199,13 +209,11 @@ export default function Playground() {
       try {
         setVoiceStatus('Connecting...')
         
-        const cleanUrl = MY_SUPABASE_URL.replace(/\/$/, '')
-        const functionUrl = `${cleanUrl}/functions/v1/chat-engine`
-        
         const { data: { user } } = await supabase.auth.getUser()
 
+        // ⚠️ FIX: Removed serverUrl to prevent 400 Bad Request
+        // Vapi will now use its internal Dashboard configuration directly.
         await vapiRef.current.start(VAPI_ASSISTANT_ID, {
-            serverUrl: functionUrl,
             variableValues: {
                 userId: user?.id,
                 modelId: selectedModel?.id
@@ -214,7 +222,11 @@ export default function Playground() {
 
       } catch (err) {
         console.error('Start Error:', err)
-        const safeMsg = err.message || JSON.stringify(err)
+        let safeMsg = "Call Failed";
+        try {
+            safeMsg = err.message || JSON.stringify(err);
+        } catch(e) { safeMsg = "Unknown Error"; }
+        
         setVoiceStatus(`Start Err: ${safeMsg}`)
       }
     }
