@@ -15,22 +15,22 @@ import {
 import { Link } from 'react-router-dom'
 
 export default function Playground() {
-  // ------------------ STATE ------------------
+  // ------------------ STATE MANAGEMENT ------------------
   const [models, setModels] = useState([])
   const [selectedModel, setSelectedModel] = useState(null)
   const [messages, setMessages] = useState([])
   const [input, setInput] = useState('')
   const [loading, setLoading] = useState(false)
-
-  // Mobile State
+  
+  // Mobile Sidebar State
   const [isSidebarOpen, setIsSidebarOpen] = useState(false)
 
-  // Image
+  // Image Handling State
   const [attachedImage, setAttachedImage] = useState(null)
   const fileInputRef = useRef(null)
   const cameraInputRef = useRef(null)
 
-  // Voice
+  // Voice Call State
   const [isTalking, setIsTalking] = useState(false)
   const [voiceStatus, setVoiceStatus] = useState('Initializing...')
   const [vapiReady, setVapiReady] = useState(false)
@@ -38,11 +38,11 @@ export default function Playground() {
   const messagesEndRef = useRef(null)
   const vapiRef = useRef(null)
 
-  // Keys
+  // Configuration Keys
   const VAPI_PUBLIC_KEY = '150fa8ac-12a5-48fb-934f-0a9bbadc2da7'
   const VAPI_ASSISTANT_ID = 'be1bcb56-7536-493b-bd99-52e041d8e950'
 
-  // ------------------ INIT ------------------
+  // ------------------ INITIALIZATION ------------------
   useEffect(() => {
     fetchLibraryModels()
     fetchChatHistory()
@@ -57,7 +57,7 @@ export default function Playground() {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
   }, [messages])
 
-  // ------------------ VAPI ------------------
+  // ------------------ VAPI ENGINE SETUP ------------------
   function loadVapiScript() {
     if (window.Vapi) {
       initializeVapiInstance()
@@ -67,13 +67,10 @@ export default function Playground() {
     setVoiceStatus('Downloading Engine...')
 
     const script = document.createElement('script')
-    // Using jsDelivr for stability
     script.src = 'https://cdn.jsdelivr.net/npm/@vapi-ai/web@latest/dist/vapi.min.js'
     script.async = true
-
     script.onload = () => initializeVapiInstance()
     script.onerror = () => setVoiceStatus('Network Error')
-
     document.body.appendChild(script)
   }
 
@@ -99,7 +96,6 @@ export default function Playground() {
         setVoiceStatus('Listening...')
       })
 
-      // Capture Vapi transcript to show in chat
       vapi.on('message', (msg) => {
         if (msg.type === 'transcript' && msg.transcriptType === 'final') {
           setMessages(p => [...p, { role: 'user', content: msg.transcript }])
@@ -116,11 +112,11 @@ export default function Playground() {
       setVoiceStatus('Ready')
     } catch (err) {
       console.error('VAPI INIT ERROR:', err)
-      setVoiceStatus('Engine Error')
+      setVoiceStatus('System Error')
     }
   }
 
-  // ------------------ DATA ------------------
+  // ------------------ DATA FETCHING ------------------
   async function fetchLibraryModels() {
     try {
       const { data: { user } } = await supabase.auth.getUser()
@@ -158,7 +154,7 @@ export default function Playground() {
     }
   }
 
-  // ------------------ IMAGE ------------------
+  // ------------------ IMAGE HANDLING ------------------
   const handleImageSelect = (e) => {
     const file = e.target.files?.[0]
     if (!file) return
@@ -174,7 +170,7 @@ export default function Playground() {
     if (cameraInputRef.current) cameraInputRef.current.value = ''
   }
 
-  // ------------------ CALL (Fixed Logic) ------------------
+  // ------------------ CALL LOGIC (SUPABASE BACKEND) ------------------
   const toggleCall = async () => {
     if (!vapiReady || !vapiRef.current) {
         if (!window.Vapi) loadVapiScript()
@@ -187,18 +183,21 @@ export default function Playground() {
       try {
         setVoiceStatus('Connecting...')
         
-        // Fix for Engine Error: Use Server URL
-        const supabaseUrl = import.meta.env.VITE_SUPABASE_URL
-        const functionUrl = supabaseUrl ? `${supabaseUrl}/functions/v1/chat-engine` : null
+        // 1. Get Supabase URL and clean trailing slash to avoid double slashes
+        const rawUrl = import.meta.env.VITE_SUPABASE_URL
+        const cleanUrl = rawUrl ? rawUrl.replace(/\/$/, '') : null
+        const functionUrl = cleanUrl ? `${cleanUrl}/functions/v1/chat-engine` : null
         
+        // 2. Validate URL
         if (!functionUrl) {
-            alert("Backend URL missing in .env")
+            console.error("Backend URL missing in .env")
             setVoiceStatus("Config Error")
             return
         }
 
         const { data: { user } } = await supabase.auth.getUser()
 
+        // 3. Start call with Server URL pointing to Supabase Edge Function
         await vapiRef.current.start(VAPI_ASSISTANT_ID, {
             serverUrl: functionUrl,
             variableValues: {
@@ -215,7 +214,7 @@ export default function Playground() {
     }
   }
 
-  // ------------------ CHAT ------------------
+  // ------------------ CHAT LOGIC ------------------
   async function handleSend(e) {
     e.preventDefault()
     if ((!input.trim() && !attachedImage) || !selectedModel) return
@@ -275,7 +274,7 @@ export default function Playground() {
     setMessages([])
   }
 
-  // ------------------ UI ------------------
+  // ------------------ UI RENDER ------------------
   return (
     <div className="flex h-[calc(100vh-80px)] bg-slate-950 text-white overflow-hidden relative">
       <input
@@ -294,7 +293,7 @@ export default function Playground() {
         className="hidden"
       />
 
-      {/* MOBILE SIDEBAR OVERLAY */}
+      {/* MOBILE MENU OVERLAY */}
       {isSidebarOpen && (
         <div className="absolute inset-0 z-50 bg-slate-900/95 p-4 flex flex-col md:hidden">
             <div className="flex justify-between items-center mb-6 border-b border-slate-800 pb-4">
@@ -344,11 +343,11 @@ export default function Playground() {
         </div>
       </div>
 
-      {/* CHAT AREA */}
+      {/* MAIN CHAT AREA */}
       <div className="flex-1 flex flex-col relative w-full">
+        {/* Header */}
         <div className="h-16 border-b border-slate-800 flex items-center justify-between px-4 md:px-6 bg-slate-900/80 backdrop-blur">
           <div className="flex items-center gap-3">
-            {/* MOBILE MENU BUTTON */}
             <button onClick={() => setIsSidebarOpen(true)} className="md:hidden p-2 text-slate-400 hover:text-white bg-slate-800 rounded-lg">
                 <Menu size={24}/>
             </button>
@@ -382,6 +381,7 @@ export default function Playground() {
           </div>
         </div>
 
+        {/* Messages List */}
         <div className="flex-1 overflow-y-auto p-4 md:p-6 space-y-6">
           {messages.map((msg, i) => (
             <div key={i} className={`flex gap-3 ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}>
@@ -410,6 +410,7 @@ export default function Playground() {
           <div ref={messagesEndRef} />
         </div>
 
+        {/* Input Area */}
         <div className="p-3 md:p-4 bg-slate-900 border-t border-slate-800 relative z-10">
           {attachedImage && (
             <div className="absolute -top-20 left-4 bg-slate-800 p-2 rounded-lg border border-slate-700 shadow-xl flex gap-2">
