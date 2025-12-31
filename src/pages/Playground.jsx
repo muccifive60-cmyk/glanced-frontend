@@ -21,8 +21,6 @@ export default function Playground() {
   const [messages, setMessages] = useState([])
   const [input, setInput] = useState('')
   const [loading, setLoading] = useState(false)
-  
-  // Mobile Sidebar State
   const [isSidebarOpen, setIsSidebarOpen] = useState(false)
 
   // Image Handling State
@@ -41,63 +39,95 @@ export default function Playground() {
   const VAPI_PUBLIC_KEY = '150fa8ac-12a5-48fb-934f-0a9bbadc2da7'
   const VAPI_ASSISTANT_ID = 'be1bcb56-7536-493b-bd99-52e041d8e950'
 
-  // ------------------ INITIALIZATION (DYNAMIC IMPORT FIX) ------------------
+  // ------------------ INITIALIZATION (SCRIPT INJECTION) ------------------
   useEffect(() => {
     fetchLibraryModels()
     fetchChatHistory()
 
-    // Initialize Vapi using Dynamic Import to prevent "Constructor" errors
-    const initializeVapi = async () => {
-      try {
-        const module = await import('@vapi-ai/web')
-        const VapiClass = module.default || module.Vapi || module
-
-        if (typeof VapiClass !== 'function') {
-          console.error('Vapi class could not be loaded dynamically.')
-          setVoiceStatus('System Error')
-          return
-        }
-
-        const vapi = new VapiClass(VAPI_PUBLIC_KEY)
-        vapiRef.current = vapi
-
-        vapi.on('call-start', () => {
-          setIsTalking(true)
-          setVoiceStatus('Connected')
-        })
-
-        vapi.on('call-end', () => {
-          setIsTalking(false)
-          setVoiceStatus('Ready')
-        })
-
-        vapi.on('speech-start', () => {
-          setVoiceStatus('Listening...')
-        })
-
-        vapi.on('message', (msg) => {
-          if (msg.type === 'transcript' && msg.transcriptType === 'final') {
-            setMessages(p => [...p, { role: 'user', content: msg.transcript }])
-          }
-        })
-
-        vapi.on('error', (e) => {
-          console.error('Vapi Error:', e)
-          setIsTalking(false)
-          setVoiceStatus('Engine Error')
-        })
-
-        setVoiceStatus('Ready')
-      } catch (err) {
-        console.error('Vapi Initialization Failed:', err)
-        setVoiceStatus('System Error')
-      }
+    // 1. CRITICAL FIX: Define 'exports' to prevent ReferenceError in some environments
+    if (!window.exports) {
+        window.exports = {}
     }
 
-    initializeVapi()
+    const loadVapiScript = () => {
+        // Check if Vapi is already loaded in the window
+        if (window.Vapi) {
+            initializeVapiInstance()
+            return
+        }
 
-    return () => {
-      if (vapiRef.current) vapiRef.current.stop()
+        setVoiceStatus('Downloading Engine...')
+        
+        // Manual Script Injection to bypass NPM build issues
+        const script = document.createElement('script')
+        script.src = "https://cdn.jsdelivr.net/npm/@vapi-ai/web/dist/vapi.min.js"
+        script.async = true
+        
+        script.onload = () => {
+            console.log("Vapi Script loaded successfully")
+            initializeVapiInstance()
+        }
+        
+        script.onerror = (e) => {
+            console.error("Script Load Error", e)
+            setVoiceStatus("Network Error")
+        }
+        
+        document.body.appendChild(script)
+    }
+
+    const initializeVapiInstance = () => {
+        try {
+            // Access Vapi from the global window object
+            const VapiClass = window.Vapi
+            
+            if (!VapiClass) {
+                console.error("Window.Vapi is missing even after script load")
+                setVoiceStatus("Load Error")
+                return
+            }
+
+            const vapi = new VapiClass(VAPI_PUBLIC_KEY)
+            vapiRef.current = vapi
+
+            // Event Listeners
+            vapi.on('call-start', () => { 
+                setIsTalking(true)
+                setVoiceStatus('Connected') 
+            })
+            
+            vapi.on('call-end', () => { 
+                setIsTalking(false)
+                setVoiceStatus('Ready') 
+            })
+            
+            vapi.on('speech-start', () => { 
+                setVoiceStatus('Listening...') 
+            })
+            
+            vapi.on('message', (msg) => {
+                if (msg.type === 'transcript' && msg.transcriptType === 'final') {
+                    setMessages(p => [...p, { role: 'user', content: msg.transcript }])
+                }
+            })
+
+            vapi.on('error', (e) => { 
+                console.error('Vapi Error:', e)
+                setIsTalking(false)
+                setVoiceStatus('Engine Error') 
+            })
+
+            setVoiceStatus('Ready')
+        } catch (err) {
+            console.error("Vapi Initialization Error:", err)
+            setVoiceStatus("System Error")
+        }
+    }
+
+    loadVapiScript()
+
+    return () => { 
+        if (vapiRef.current) vapiRef.current.stop() 
     }
   }, [])
 
@@ -159,9 +189,12 @@ export default function Playground() {
     if (cameraInputRef.current) cameraInputRef.current.value = ''
   }
 
-  // ------------------ CALL LOGIC (SUPABASE BACKEND) ------------------
+  // ------------------ CALL LOGIC ------------------
   const toggleCall = async () => {
-    if (!vapiRef.current) return
+    if (!vapiRef.current) {
+        if (!window.Vapi) setVoiceStatus("Reloading Engine...")
+        return 
+    }
 
     if (isTalking) {
       vapiRef.current.stop()
@@ -175,9 +208,9 @@ export default function Playground() {
         const functionUrl = cleanUrl ? `${cleanUrl}/functions/v1/chat-engine` : null
         
         if (!functionUrl) {
-            console.error("Backend URL missing")
-            setVoiceStatus("Config Error")
-            return
+             console.error("Backend URL missing")
+             setVoiceStatus("Config Error")
+             return
         }
 
         const { data: { user } } = await supabase.auth.getUser()
@@ -244,7 +277,7 @@ export default function Playground() {
       setMessages(p => [...p, { role: 'ai', content: reply }])
     } catch (err) {
       console.error(err)
-      setMessages(p => [...p, { role: 'system', content: 'Error connecting to AI.' }])
+      setMessages(p => [...p, { role: 'system', content: 'Connection Error' }])
     } finally {
       setLoading(false)
     }
@@ -277,7 +310,7 @@ export default function Playground() {
         className="hidden"
       />
 
-      {/* MOBILE MENU OVERLAY */}
+      {/* MOBILE MENU */}
       {isSidebarOpen && (
         <div className="absolute inset-0 z-50 bg-slate-900/95 p-4 flex flex-col md:hidden">
             <div className="flex justify-between items-center mb-6 border-b border-slate-800 pb-4">
@@ -332,7 +365,6 @@ export default function Playground() {
         {/* Header */}
         <div className="h-16 border-b border-slate-800 flex items-center justify-between px-4 md:px-6 bg-slate-900/80 backdrop-blur">
           <div className="flex items-center gap-3">
-            {/* MOBILE MENU BUTTON */}
             <button onClick={() => setIsSidebarOpen(true)} className="md:hidden p-2 text-slate-400 hover:text-white bg-slate-800 rounded-lg">
                 <Menu size={24}/>
             </button>
