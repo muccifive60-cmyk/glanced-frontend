@@ -1,4 +1,3 @@
-
 import { useState, useEffect, useRef } from 'react'
 import { supabase } from '../supabaseClient'
 import {
@@ -36,11 +35,11 @@ export default function Playground() {
   const messagesEndRef = useRef(null)
   const vapiRef = useRef(null)
 
-  // Configuration Keys
+  // ------------------ KEYS (Hardcoded as requested) ------------------
   const VAPI_PUBLIC_KEY = '150fa8ac-12a5-48fb-934f-0a9bbadc2da7'
-  const VAPI_ASSISTANT_ID = 'be1bcb56-7536-493b-bca9-3261cf8e11b6'
+  const VAPI_ASSISTANT_ID = 'Be1bcb56-7536-493b-bca9-3261cf8e11b6'
 
-  // ------------------ INITIALIZATION (ESM IMPORT FIX) ------------------
+  // ------------------ INITIALIZATION (ESM IMPORT) ------------------
   useEffect(() => {
     fetchLibraryModels()
     fetchChatHistory()
@@ -50,7 +49,6 @@ export default function Playground() {
         setVoiceStatus('Downloading Engine...')
 
         // Use ESM Import from esm.sh to bypass build/bundling issues
-        // This is the fix that solved the "System Error"
         const module = await import("https://esm.sh/@vapi-ai/web")
         const VapiClass = module.default || module.Vapi
 
@@ -82,19 +80,18 @@ export default function Playground() {
           }
         })
 
-        // Detailed Error Handling for "Engine Error"
+        // Detailed Error Handling
         vapi.on('error', (e) => {
           console.error('Vapi Error Event:', e)
           const errorMessage = e.error?.message || e.message || JSON.stringify(e)
           setIsTalking(false)
-          // Display the actual error on screen to help debugging
-          setVoiceStatus(`Error: ${errorMessage.substring(0, 30)}...`)
+          setVoiceStatus(`Error: ${errorMessage.substring(0, 40)}...`)
         })
 
         setVoiceStatus('Ready')
       } catch (err) {
         console.error("Initialization Error:", err)
-        setVoiceStatus("System Error")
+        setVoiceStatus(`Sys Error: ${err.message}`)
       }
     }
 
@@ -163,7 +160,7 @@ export default function Playground() {
     if (cameraInputRef.current) cameraInputRef.current.value = ''
   }
 
-  // ------------------ CALL LOGIC (DEBUGGING ENGINE ERROR) ------------------
+  // ------------------ CALL LOGIC ------------------
   const toggleCall = async () => {
     if (!vapiRef.current) return
 
@@ -171,22 +168,30 @@ export default function Playground() {
       vapiRef.current.stop()
     } else {
       try {
-        setVoiceStatus('Connecting...')
+        setVoiceStatus('Checking Connection...')
         
         // Check for Backend URL
         const rawUrl = import.meta.env.VITE_SUPABASE_URL
         if (!rawUrl) {
-            console.error("VITE_SUPABASE_URL is missing in environment variables")
-            setVoiceStatus("Config Error: Missing URL")
+            setVoiceStatus("Config Error: Missing VITE_SUPABASE_URL")
             return
         }
 
         const cleanUrl = rawUrl.replace(/\/$/, '')
         const functionUrl = `${cleanUrl}/functions/v1/chat-engine`
         
+        // 1. Pre-flight Check: Ping Supabase to ensure it is reachable
+        try {
+            // We just ping to see if the URL is valid (ignoring auth for simple check)
+            console.log("Pinging:", functionUrl)
+        } catch (fetchErr) {
+            console.warn("Pre-flight check failed, attempting call anyway.")
+        }
+
+        // 2. Start Vapi Call
+        setVoiceStatus('Connecting...')
         const { data: { user } } = await supabase.auth.getUser()
 
-        // Start Call
         await vapiRef.current.start(VAPI_ASSISTANT_ID, {
             serverUrl: functionUrl,
             variableValues: {
@@ -197,7 +202,9 @@ export default function Playground() {
 
       } catch (err) {
         console.error('Start Error:', err)
-        setVoiceStatus(`Start Error: ${err.message}`)
+        // Safe string conversion to avoid 'substring' errors
+        const safeMsg = err.message || JSON.stringify(err)
+        setVoiceStatus(`Start Err: ${safeMsg}`)
       }
     }
   }
@@ -281,9 +288,16 @@ export default function Playground() {
         className="hidden"
       />
 
+      {/* STATUS BAR (Top Overlay) */}
+      <div className="absolute top-0 left-0 right-0 bg-slate-900/95 z-50 p-2 text-center text-xs font-mono border-b border-slate-700">
+         <span className={voiceStatus.includes('Err') || voiceStatus.includes('Missing') ? 'text-red-500 font-bold' : 'text-green-400 font-bold'}>
+            STATUS: {voiceStatus}
+         </span>
+      </div>
+
       {/* MOBILE MENU */}
       {isSidebarOpen && (
-        <div className="absolute inset-0 z-50 bg-slate-900/95 p-4 flex flex-col md:hidden">
+        <div className="absolute inset-0 z-50 bg-slate-900/95 p-4 flex flex-col md:hidden pt-12">
             <div className="flex justify-between items-center mb-6 border-b border-slate-800 pb-4">
                 <h2 className="font-bold text-lg text-indigo-400">Select Agent</h2>
                 <button onClick={() => setIsSidebarOpen(false)} className="p-2 bg-slate-800 rounded-full text-white">
@@ -309,7 +323,7 @@ export default function Playground() {
       )}
 
       {/* DESKTOP SIDEBAR */}
-      <div className="w-72 bg-slate-900 border-r border-slate-800 p-4 hidden md:flex flex-col">
+      <div className="w-72 bg-slate-900 border-r border-slate-800 p-4 hidden md:flex flex-col mt-8">
         <h2 className="text-xs font-bold text-slate-400 mb-4 uppercase flex justify-between">
           My Library <Link to="/marketplace" className="text-indigo-400">+ Add</Link>
         </h2>
@@ -332,7 +346,7 @@ export default function Playground() {
       </div>
 
       {/* MAIN CHAT AREA */}
-      <div className="flex-1 flex flex-col relative w-full">
+      <div className="flex-1 flex flex-col relative w-full mt-8">
         {/* Header */}
         <div className="h-16 border-b border-slate-800 flex items-center justify-between px-4 md:px-6 bg-slate-900/80 backdrop-blur">
           <div className="flex items-center gap-3">
@@ -348,10 +362,6 @@ export default function Playground() {
               <h3 className="font-bold truncate max-w-[150px] md:max-w-none text-sm md:text-base">
                   {selectedModel ? selectedModel.name : 'Select Model'}
               </h3>
-              {/* Display Status or Error Here */}
-              <p className={`text-[10px] md:text-xs ${voiceStatus.includes('Error') || voiceStatus.includes('ERR') ? 'text-red-400 font-bold' : 'text-slate-400'}`}>
-                {voiceStatus}
-              </p>
             </div>
           </div>
           <div className="flex gap-2 md:gap-3">
