@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef } from 'react'
 import { supabase } from '../supabaseClient'
+import Vapi from '@vapi-ai/web'
 import {
   Send,
   Bot,
@@ -32,9 +33,8 @@ export default function Playground() {
 
   // Voice Call State
   const [isTalking, setIsTalking] = useState(false)
-  const [voiceStatus, setVoiceStatus] = useState('Initializing...')
-  const [vapiReady, setVapiReady] = useState(false)
-
+  const [voiceStatus, setVoiceStatus] = useState('Ready')
+  
   const messagesEndRef = useRef(null)
   const vapiRef = useRef(null)
 
@@ -46,75 +46,38 @@ export default function Playground() {
   useEffect(() => {
     fetchLibraryModels()
     fetchChatHistory()
-    loadVapiScript()
+    
+    // Initialize Vapi SDK directly using the imported package
+    try {
+        const vapi = new Vapi(VAPI_PUBLIC_KEY)
+        vapiRef.current = vapi
 
-    return () => {
-      if (vapiRef.current) vapiRef.current.stop()
+        vapi.on('call-start', () => { setIsTalking(true); setVoiceStatus('Connected'); })
+        vapi.on('call-end', () => { setIsTalking(false); setVoiceStatus('Ready'); })
+        vapi.on('speech-start', () => { setVoiceStatus('Listening...'); })
+        
+        vapi.on('message', (msg) => {
+            if (msg.type === 'transcript' && msg.transcriptType === 'final') {
+                setMessages(p => [...p, { role: 'user', content: msg.transcript }])
+            }
+        })
+        
+        vapi.on('error', (e) => { 
+            console.error('Vapi Error:', e); 
+            setIsTalking(false); 
+            setVoiceStatus('Engine Error'); 
+        })
+    } catch (err) {
+        console.error("Vapi Init Error:", err)
+        setVoiceStatus("System Error")
     }
+
+    return () => { if (vapiRef.current) vapiRef.current.stop() }
   }, [])
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
   }, [messages])
-
-  // ------------------ VAPI ENGINE SETUP ------------------
-  function loadVapiScript() {
-    if (window.Vapi) {
-      initializeVapiInstance()
-      return
-    }
-
-    setVoiceStatus('Downloading Engine...')
-
-    const script = document.createElement('script')
-    script.src = 'https://cdn.jsdelivr.net/npm/@vapi-ai/web@latest/dist/vapi.min.js'
-    script.async = true
-    script.onload = () => initializeVapiInstance()
-    script.onerror = () => setVoiceStatus('Network Error')
-    document.body.appendChild(script)
-  }
-
-  function initializeVapiInstance() {
-    try {
-      const VapiClass = window.Vapi?.default || window.Vapi
-      if (!VapiClass) throw new Error('Vapi constructor not found')
-
-      const vapi = new VapiClass(VAPI_PUBLIC_KEY)
-      vapiRef.current = vapi
-
-      vapi.on('call-start', () => {
-        setIsTalking(true)
-        setVoiceStatus('Connected')
-      })
-
-      vapi.on('call-end', () => {
-        setIsTalking(false)
-        setVoiceStatus('Ready')
-      })
-
-      vapi.on('speech-start', () => {
-        setVoiceStatus('Listening...')
-      })
-
-      vapi.on('message', (msg) => {
-        if (msg.type === 'transcript' && msg.transcriptType === 'final') {
-          setMessages(p => [...p, { role: 'user', content: msg.transcript }])
-        }
-      })
-
-      vapi.on('error', (e) => {
-        console.error('Vapi Error:', e)
-        setIsTalking(false)
-        setVoiceStatus('Engine Error')
-      })
-
-      setVapiReady(true)
-      setVoiceStatus('Ready')
-    } catch (err) {
-      console.error('VAPI INIT ERROR:', err)
-      setVoiceStatus('System Error')
-    }
-  }
 
   // ------------------ DATA FETCHING ------------------
   async function fetchLibraryModels() {
@@ -172,10 +135,7 @@ export default function Playground() {
 
   // ------------------ CALL LOGIC (SUPABASE BACKEND) ------------------
   const toggleCall = async () => {
-    if (!vapiReady || !vapiRef.current) {
-        if (!window.Vapi) loadVapiScript()
-        return
-    }
+    if (!vapiRef.current) return
 
     if (isTalking) {
       vapiRef.current.stop()
@@ -183,21 +143,21 @@ export default function Playground() {
       try {
         setVoiceStatus('Connecting...')
         
-        // 1. Get Supabase URL and clean trailing slash to avoid double slashes
+        // 1. Construct Supabase Edge Function URL
         const rawUrl = import.meta.env.VITE_SUPABASE_URL
         const cleanUrl = rawUrl ? rawUrl.replace(/\/$/, '') : null
         const functionUrl = cleanUrl ? `${cleanUrl}/functions/v1/chat-engine` : null
         
         // 2. Validate URL
         if (!functionUrl) {
-            console.error("Backend URL missing in .env")
-            setVoiceStatus("Config Error")
-            return
+             console.error("Missing Backend URL")
+             setVoiceStatus("Config Error")
+             return
         }
 
         const { data: { user } } = await supabase.auth.getUser()
 
-        // 3. Start call with Server URL pointing to Supabase Edge Function
+        // 3. Start call using Server URL (Connecting to Supabase)
         await vapiRef.current.start(VAPI_ASSISTANT_ID, {
             serverUrl: functionUrl,
             variableValues: {
@@ -205,7 +165,6 @@ export default function Playground() {
                 modelId: selectedModel?.id
             }
         })
-
       } catch (err) {
         console.error('Vapi start error:', err)
         setIsTalking(false)
@@ -348,6 +307,7 @@ export default function Playground() {
         {/* Header */}
         <div className="h-16 border-b border-slate-800 flex items-center justify-between px-4 md:px-6 bg-slate-900/80 backdrop-blur">
           <div className="flex items-center gap-3">
+            {/* MOBILE MENU BUTTON */}
             <button onClick={() => setIsSidebarOpen(true)} className="md:hidden p-2 text-slate-400 hover:text-white bg-slate-800 rounded-lg">
                 <Menu size={24}/>
             </button>
