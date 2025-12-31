@@ -38,7 +38,7 @@ export default function Playground() {
 
   // Configuration Keys
   const VAPI_PUBLIC_KEY = '150fa8ac-12a5-48fb-934f-0a9bbadc2da7'
-  const VAPI_ASSISTANT_ID = 'be1bcb56-7536-493b-bd99-52e041d8e950'
+  const VAPI_ASSISTANT_ID = 'be1bcb56-7536-493b-bca9-3261cf8e11b6'
 
   // ------------------ INITIALIZATION (ESM IMPORT FIX) ------------------
   useEffect(() => {
