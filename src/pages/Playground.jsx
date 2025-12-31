@@ -1,4 +1,3 @@
-
 import { useState, useEffect, useRef } from 'react'
 import { supabase } from '../supabaseClient'
 import * as VapiSDK from '@vapi-ai/web' // <--- SMART IMPORT (Tunachukua kila kitu)
