@@ -26,7 +26,7 @@ export default function Playground() {
   const messagesEndRef = useRef(null)
   const vapiRef = useRef(null)
   
-  // 🔥 FIX A: Tunatumia Ref kukumbuka Model ndani ya Event Listeners
+  // 🔥 FIX A: Using Ref to track selected Model inside Event Listeners
   const selectedModelRef = useRef(null)
 
   // ==================================================================================
@@ -36,7 +36,7 @@ export default function Playground() {
   const MY_SUPABASE_URL = 'https://hveyemdkojlijcesvtkt.supabase.co' 
   // ==================================================================================
 
-  // 🔥 Sync Ref with State (Hii inahakikisha listener inapata model sahihi)
+  // 🔥 Sync Ref with State (Ensures listener gets the correct model)
   useEffect(() => {
     selectedModelRef.current = selectedModel
   }, [selectedModel])
@@ -73,7 +73,7 @@ export default function Playground() {
           setVoiceStatus('Listening...')
         })
 
-        // 🔥 FIX A: Transcripts zinasave Supabase sasa!
+        // 🔥 FIX A: Transcripts now save to Supabase!
         vapi.on('message', async (msg) => {
           if (msg.type === 'transcript' && msg.transcriptType === 'final') {
             const text = msg.transcript
@@ -84,7 +84,7 @@ export default function Playground() {
             // 2. Save to DB (Background)
             try {
                 const { data: { user } } = await supabase.auth.getUser()
-                const currentModel = selectedModelRef.current // Tunatumia Ref hapa!
+                const currentModel = selectedModelRef.current // Using Ref here!
                 
                 if (user && currentModel) {
                     await supabase.from('chat_history').insert({
@@ -98,9 +98,6 @@ export default function Playground() {
                 console.error("Failed to save transcript:", err)
             }
           }
-          
-          // Optional: Ukipenda kujibu pia sauti ya AI (kama Vapi inatuma response text)
-          // Kwa sasa Vapi inajibu kwa sauti, hatuhifadhi text ya AI hapa isipokuwa ukitaka.
         })
 
         vapi.on('error', (e) => {
@@ -123,7 +120,7 @@ export default function Playground() {
     return () => {
       if (vapiRef.current) {
         vapiRef.current.stop()
-        vapiRef.current.removeAllListeners() // Futa listeners zote
+        vapiRef.current.removeAllListeners() // Remove all listeners
       }
     }
   }, [])
@@ -190,7 +187,7 @@ export default function Playground() {
   const toggleCall = async () => {
     if (!vapiRef.current) return
 
-    // 🔥 FIX B: Zuia Call kama hakuna Model iliyochaguliwa
+    // 🔥 FIX B: Prevent Call if no Model is selected
     if (!selectedModel && !isTalking) {
         alert("Please select an AI Agent from the library first!")
         return
@@ -459,3 +456,4 @@ export default function Playground() {
       </div>
     </div>
   )
+}
