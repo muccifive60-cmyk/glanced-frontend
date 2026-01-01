@@ -5,7 +5,7 @@ import {
   TrendingUp, Sparkles, Heart, Server, Zap
 } from 'lucide-react'
 
-// ⚠️ KEYS
+// API KEYS
 const VAPI_PUBLIC_KEY = '150fa8ac-12a5-48fb-934f-0a9bbadc2da7'
 const VAPI_ASSISTANT_ID = 'Be1bcb56-7536-493b-bca9-3261cf8e11b6'
 
@@ -36,18 +36,17 @@ export default function Marketplace() {
         vapiInstance.on('error', (e) => { 
             console.error("Vapi Error:", e);
             let msg = "Unknown Error";
-            try {
-                if (typeof e === 'string') msg = e;
-                else if (e.message) msg = e.message;
-                else if (e.error && e.error.message) msg = e.error.message;
-                else msg = JSON.stringify(e);
-            } catch(err) {}
+            if (e.error?.message) msg = e.error.message;
+            else if (e.message) msg = e.message;
+            else msg = JSON.stringify(e);
             
-            setVoiceStatus(`Err: ${msg.substring(0, 30)}`); 
+            setVoiceStatus(`Err: ${msg.substring(0, 30)}...`); 
             setIsCalling(false); 
         })
-
-      } catch (err) { console.error(err) }
+      } catch (err) { 
+        console.error(err); 
+        setVoiceStatus("Init Failed"); 
+      }
     }
     initVapi()
     return () => { if (vapiRef.current) vapiRef.current.stop() }
@@ -65,19 +64,27 @@ export default function Marketplace() {
     fetchModels()
   }, [])
 
-  // 3. HANDLE CALL (FORCE NO SERVER to fix 400 Error)
+  // 3. HANDLE CALL
   const handleGeneralCall = async () => {
-    if (!vapiRef.current) return
+    if (!vapiRef.current) {
+        alert("Vapi not ready. Please refresh.")
+        return
+    }
     if (isCalling) { vapiRef.current.stop(); return }
 
     setVoiceStatus('Connecting...')
     try {
-        await vapiRef.current.start(VAPI_ASSISTANT_ID, {
-            serverUrl: null, // Prevents call from routing to Supabase
-        })
+        // Request Mic Permission
+        await navigator.mediaDevices.getUserMedia({ audio: true });
+        
+        // Start Call (No serverUrl overrides)
+        await vapiRef.current.start(VAPI_ASSISTANT_ID)
     } 
     catch (err) { 
-        setVoiceStatus('Failed to start'); 
+        console.error("Start Error:", err);
+        let errMsg = err.message || JSON.stringify(err);
+        if (errMsg.includes("Permission denied")) errMsg = "Allow Mic Access!";
+        setVoiceStatus(`Fail: ${errMsg.substring(0, 20)}...`); 
         setIsCalling(false);
     }
   }
@@ -88,13 +95,8 @@ export default function Marketplace() {
     const { data: { user } } = await supabase.auth.getUser()
     if (!user) { alert("Please log in!"); setPurchasing(null); return }
     
-    // Check if already exists
     const { data: existing } = await supabase.from('user_models').select('*').eq('user_id', user.id).eq('model_id', modelId)
-    if (existing && existing.length > 0) {
-        alert("Already in your Library!");
-        setPurchasing(null);
-        return;
-    }
+    if (existing && existing.length > 0) { alert("Already in Library!"); setPurchasing(null); return; }
 
     const { error } = await supabase.from('user_models').insert([{ user_id: user.id, model_id: modelId }])
     if (error) alert("Error: " + error.message)
@@ -159,7 +161,7 @@ export default function Marketplace() {
                 {isCalling ? <PhoneOff size={24}/> : <Phone size={24}/>}
                 <span>{isCalling ? 'End Session' : 'Start Voice Call'}</span>
              </button>
-             <p className={`mt-4 text-xs font-mono tracking-wider uppercase ${voiceStatus.includes('Err') || voiceStatus.includes('Fail') ? 'text-red-400' : 'text-indigo-400/50'}`}>
+             <p className={`mt-4 text-xs font-mono tracking-wider uppercase ${voiceStatus.includes('Err') || voiceStatus.includes('Fail') ? 'text-red-400 bg-red-900/20 px-3 py-1 rounded' : 'text-indigo-400/50'}`}>
                 {voiceStatus}
              </p>
          </div>
