@@ -24,6 +24,9 @@ export default function Playground() {
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
   const [attachedImage, setAttachedImage] = useState(null);
   
+  // NEW: State to hold the actual API Key from database
+  const [apiKey, setApiKey] = useState(null);
+  
   const fileInputRef = useRef(null);
   const messagesEndRef = useRef(null);
 
@@ -31,13 +34,34 @@ export default function Playground() {
   useEffect(() => { 
     fetchGlobalAgents(); 
     fetchChatHistory(); 
+    fetchUserApiKey(); // NEW: Load the key when page opens
   }, []);
 
   useEffect(() => { 
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' }); 
   }, [messages, loading]);
 
-  // --- 1. FETCH AGENTS (Directly from Supabase for speed & reliability) ---
+  // --- 1. FETCH API KEY (CRITICAL FIX) ---
+  async function fetchUserApiKey() {
+    try {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) return;
+
+      const { data, error } = await supabase
+        .from('api_keys')
+        .select('key')
+        .eq('user_id', user.id)
+        .single();
+
+      if (data && data.key) {
+        setApiKey(data.key);
+      } 
+    } catch (error) {
+      console.error("Error fetching API key:", error);
+    }
+  }
+
+  // --- 2. FETCH AGENTS ---
   async function fetchGlobalAgents() {
     try {
       const { data, error } = await supabase
@@ -73,7 +97,7 @@ export default function Playground() {
     }
   }
 
-  // --- 2. FETCH HISTORY FROM SUPABASE ---
+  // --- 3. FETCH HISTORY FROM SUPABASE ---
   async function fetchChatHistory() {
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) return;
@@ -87,11 +111,18 @@ export default function Playground() {
     if (data) setMessages(data);
   }
 
-  // --- 3. SEND MESSAGE TO RENDER SERVER ---
+  // --- 4. SEND MESSAGE TO RENDER SERVER ---
   async function handleSend(e) {
     e.preventDefault();
     if ((!input.trim() && !attachedImage) || !selectedModel) return;
     
+    // Safety Check: Ensure we have the API Key
+    if (!apiKey) {
+      console.warn("API Key not loaded yet. Retrying...");
+      await fetchUserApiKey();
+      // If still no key, warn user (or let request fail gracefully)
+    }
+
     const text = input;
     const image = attachedImage;
     
@@ -137,7 +168,7 @@ export default function Playground() {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          'Authorization': `Bearer ${user?.id}` // ADDED: This fixes the "Missing API Key" error
+          'Authorization': `Bearer ${apiKey}` // FIXED: Using the actual API Key from Supabase
         },
         body: JSON.stringify(payload)
       });
@@ -176,7 +207,7 @@ export default function Playground() {
     }
   }
 
-  // --- UI RENDER ---
+  // --- UI RENDER (UNCHANGED) ---
   return (
     <div className="flex h-[calc(100vh-80px)] bg-slate-950 text-white overflow-hidden relative font-sans">
       {/* Hidden File Input */}
