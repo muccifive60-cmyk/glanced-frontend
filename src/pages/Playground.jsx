@@ -40,7 +40,6 @@ export default function Playground() {
   // --- 1. FETCH AGENTS (Directly from Supabase for speed & reliability) ---
   async function fetchGlobalAgents() {
     try {
-      // We fetch directly from Supabase to ensure the UI loads fast
       const { data, error } = await supabase
         .from('ai_models')
         .select('*')
@@ -49,25 +48,22 @@ export default function Playground() {
 
       if (error) throw error;
 
-      // Formatting data for the UI
       const formattedModels = data.map(agent => ({
         id: agent.id,
         name: agent.name,
         description: agent.description,
         category: agent.category,
-        system_prompt: agent.system_prompt, // Important: We need this for the AI persona
+        system_prompt: agent.system_prompt,
         provider: agent.provider || 'GlanceID'
       }));
 
       setModels(formattedModels);
       
-      // Select the first model by default if none selected
       if (!selectedModel && formattedModels.length > 0) {
         setSelectedModel(formattedModels[0]);
       }
     } catch (error) {
       console.error("Error loading agents:", error);
-      // Fallback
       setModels([{ 
         id: 'fallback', 
         name: 'Standard AI', 
@@ -104,7 +100,7 @@ export default function Playground() {
     setAttachedImage(null);
     setLoading(true);
     
-    // Optimistic UI Update (Show user message immediately)
+    // Optimistic UI Update
     const userMsg = { role: 'user', content: text, image };
     setMessages(prev => [...prev, userMsg]);
 
@@ -123,10 +119,9 @@ export default function Playground() {
       }
 
       // B. Prepare the Request Body
-      // We send the 'agent_config' so the Backend knows exactly who to roleplay
       const payload = {
-        model: "gemini-1.5-flash", // Using the standard high-speed model
-        messages: [...messages, { role: 'user', content: text }], // Send history context
+        model: "gemini-1.5-flash",
+        messages: [...messages, { role: 'user', content: text }],
         agent_config: {
           name: selectedModel.name,
           category: selectedModel.category,
@@ -142,8 +137,7 @@ export default function Playground() {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          // If you implement API Keys later, uncomment below:
-          // 'Authorization': `Bearer ${user?.id}` 
+          'Authorization': `Bearer ${user?.id}` // ADDED: This fixes the "Missing API Key" error
         },
         body: JSON.stringify(payload)
       });

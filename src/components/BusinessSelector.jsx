@@ -5,7 +5,7 @@ export default function BusinessSelector({ onSelect }) {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    fetch("http://localhost:3000/businesses")
+    fetch("https://glanceid-backend.onrender.com/businesses")
       .then((res) => res.json())
       .then((data) => {
         setBusinesses(data);
